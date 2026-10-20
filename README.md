@@ -1,49 +1,53 @@
-# Veyra · Next.js expense dashboard
+# Folio · expense dashboard
 
-A responsive personal dashboard using Next.js App Router, TypeScript, Recharts and Lucide. On iPhone, navigation moves to the bottom, transaction rows condense and charts/cards stack vertically.
-
-## Visual identity
-
-**Veyra** is a coined brand inspired by value and a new era of understanding your money. Its original vector mark uses two directional ribbons to form a V, with a mint diamond representing value in motion. The reusable logo lives at `public/veyra-logo.svg`, with a matching favicon in `app/icon.svg` and an inline component in `components/brand.tsx`.
-
-The interface adapts the supplied mobile reference: a violet gradient spending header, translucent metrics, a rounded content sheet, softly filled trend charts, color-coded category bars and a floating refresh control. Category percentages represent share of actual spending, not invented budgets. Category cards open filtered transactions. Income and net cash flow remain visible in the mobile summary. The same styling extends to sign-in and desktop layouts.
+Next.js 16 frontend for the FastAPI SMS expense tracker in `../expense-tracker-server`. Built mobile-first for iPhone, with a sidebar layout on desktop.
 
 ## Run
 
-```powershell
+```bash
 npm install
-npm run dev
+cp .env.example .env.local   # optional, defaults to http://127.0.0.1:8000
+npm run dev                  # http://localhost:3000
 ```
 
-Open http://localhost:3000 with FastAPI running on port 8000. Optional `.env.local`: `BACKEND_URL=http://127.0.0.1:8000`. Next.js proxies `/api/v1/*` to FastAPI. Rebuild/restart when changing this target.
+Start the backend first (`uv run uvicorn main:app --port 8000` in the server folder). Next.js proxies `/api/v1/*` to `BACKEND_URL`, so the browser only talks to this origin and the backend's session cookie stays first-party. Google sign-in, the webhook and the iPhone Shortcut are configured in the backend README.
 
-Google credentials, callback URLs and iPhone automation instructions are in the backend README (`../expense-tracker-server/README.md`). Google client secrets and webhook secrets never belong in frontend variables.
+**Production:** rewrites are resolved at build time, so set `BACKEND_URL` **before** `npm run build`, then `npm start`. For iPhone access use a stable HTTPS domain and point the backend's `FRONTEND_URL` / `GOOGLE_REDIRECT_URI` at it. Previewing `next dev` from a phone over your LAN needs that address in `allowedDevOrigins` in `next.config.ts`, and Google sign-in won't work on a bare LAN IP.
 
-## Included
+## Screens
 
-- Google sign-in with setup, error and retry states.
-- Income, expenses, net cash flow, daily average, cash-flow and category charts.
-- Currency/date selection, search, category/type filters, pagination, transaction details and current-page CSV export.
-- Empty/loading/error states, mobile safe areas, keyboard controls, modal focus management and reduced motion.
+| Screen | What it shows |
+| --- | --- |
+| **Home** | Spent this month vs the same days last month, income and net flow, a one-line insight, recent transactions grouped by day. On desktop: a spending donut and the pace card. |
+| **Report** | Expenses / Income switch. Donut by category or daily bars, daily average, peak day, category cards with share and change vs last month, spending pace, top merchants, 6-month cash flow. |
+| **Activity** | Every transaction with search (merchant, amount, account, reference, SMS text), type chips, *Needs review*, period and category filters. |
+| **Settings** | Bank balance (set, update, remove), spending limits (weekly/monthly with live meters), profile, sync status, currency (when there's more than one), add to Home Screen, sign out. |
 
-Charts/totals reflect the period and currency. Table filters only affect the table. Dates use India Standard Time. Unparsed records are flagged and excluded from totals. Production has no demo data. Google Fonts have system font fallbacks.
+**Balance left** (Home header, under *Spent this month*) is your bank balance from Settings, minus debits and plus credits recorded since you saved it. The backend computes it (`/api/v1/balance`), so it matches what the SMS webhook returns. Credit-card spends count when the card bill is paid. See the backend README.
+
+The **bell** on Home opens the notifications drawer. Spend-limit notifications link to Settings → Spending limits, and a pinned row lists SMS that need review. The red dot means unread notifications. Tap any transaction for the detail sheet with the original SMS. Category cards and donut legends open Activity pre-filtered.
+
+## How numbers are computed
+
+- All transactions are fetched once (200 per request). After that, the app **polls every 5 seconds** while it's visible. Each poll asks only for rows recorded since the newest one it has (`created_after`, with a 15 s overlap de-duplicated by id) plus the balance, so an idle poll is a few hundred bytes. Hidden tabs and a locked phone don't poll. Coming back after a minute does a full refresh. The "Couldn't refresh" banner appears only after 3 failed polls in a row.
+- Money is summed in paise (integers). Dates are grouped in India Standard Time.
+- SMS the backend couldn't parse (`is_parsed = false`) are listed under *Needs review* and never counted in totals.
+- "vs last month" compares the same days of the previous month while a month is in progress.
+- Each category has a fixed colour (`lib/categories.ts`), so it doesn't change colour from month to month. The palette was checked for colour-blind separation.
+
+## Code map
+
+- `app/`: routes, metadata, PWA manifest, icons
+- `components/data-provider.tsx`: session, data loading, shared month/currency state
+- `components/views/*`: one file per screen
+- `components/charts/*`: hand-drawn SVG donut and Recharts bar charts (each with a table view)
+- `lib/analytics.ts`: all aggregations (pure functions)
+- `lib/format.ts`: IST dates and `en-IN` currency formatting
 
 ## Checks
 
-```powershell
-npm run typecheck
+```bash
+npx tsc --noEmit
+npm run lint
 npm run build
-npx playwright test
 ```
-
-Browser tests use isolated mock responses and screenshots of fixtures, not real financial data. Tests use installed Microsoft Edge on Windows and Chromium elsewhere; run `npx playwright install chromium` on Linux/macOS first.
-
-Tests use port 3100 to avoid reusing the live development server on port 3000. Build before running browser tests.
-
-If the system npm shim is broken on Windows, use:
-
-```powershell
-& 'C:\Program Files\nodejs\node.exe' 'C:\Program Files\nodejs\node_modules\npm\bin\npm-cli.js' run dev
-```
-
-The dev server binds to 0.0.0.0 for LAN preview, subject to your firewall. iPhone Google sign-in needs a stable HTTPS frontend domain with the matching OAuth callback configured; see the backend README.
