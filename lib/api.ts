@@ -1,4 +1,4 @@
-import type { Balance, Inbox, LimitsSummary, Transaction, User } from "./types";
+import type { Balance, Inbox, LimitsSummary, NewTransaction, Transaction, User } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -31,6 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     }
     throw new ApiError(response.status, detail);
   }
+  if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
 }
 
@@ -73,6 +74,17 @@ export const saveLimits = (limits: { weekly_limit: string | null; monthly_limit:
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(limits),
   });
+
+/** A transaction added by hand (cash, or anything without an SMS). */
+export const addTransaction = (input: NewTransaction) =>
+  request<Transaction>("/api/v1/transactions", {
+    method: "POST",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(input),
+  });
+
+/** Only works for transactions added by hand; bank SMS can't be deleted. */
+export const deleteTransaction = (id: string) => request<void>(`/api/v1/transactions/${id}`, { method: "DELETE" });
 
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 

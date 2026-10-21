@@ -1,9 +1,9 @@
 "use client";
 
-import { CornerDownRight, CreditCard, TriangleAlert } from "lucide-react";
+import { Banknote, CornerDownRight, CreditCard, TriangleAlert } from "lucide-react";
 
 import { groupByDay, type Txn } from "@/lib/analytics";
-import { categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/categories";
+import { CASH_ACCOUNT, categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/categories";
 import { dayHeading, formatMoney, timeLabel } from "@/lib/format";
 
 import { useData } from "./data-provider";
@@ -43,7 +43,7 @@ export function TransactionRow({ t }: { t: Txn }) {
                 <span className="truncate">{category}</span>
               </span>
             ) : (
-              <span className="truncate font-medium text-[#9a6700]">Needs review</span>
+              <span className="truncate font-medium text-warn">Needs review</span>
             )}
             <span className="sr-only">, {timeLabel(t.transaction_time)}</span>
           </span>
@@ -59,7 +59,11 @@ export function TransactionRow({ t }: { t: Txn }) {
           </span>
           {t.account_ref ? (
             <span className="mt-1 flex items-center justify-end gap-1 text-[13px] whitespace-nowrap text-ink-2">
-              <CreditCard size={13} className="text-ink-3" aria-hidden />
+              {t.account_ref === CASH_ACCOUNT ? (
+                <Banknote size={13} className="text-ink-3" aria-hidden />
+              ) : (
+                <CreditCard size={13} className="text-ink-3" aria-hidden />
+              )}
               {shortAccount(t.account_ref)}
             </span>
           ) : null}

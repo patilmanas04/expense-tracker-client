@@ -5,8 +5,8 @@ import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxi
 import type { DayPoint, MonthPoint } from "@/lib/analytics";
 import { compactMoney, formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
 
-const AXIS_TICK = { fill: "#8C8C96", fontSize: 11 };
-const GRID = "#EFEFF2";
+const AXIS_TICK = { fill: "var(--color-ink-2)", fontSize: 11 };
+const GRID = "var(--color-line)";
 
 interface TooltipRow {
   name: string;
@@ -17,13 +17,13 @@ interface TooltipRow {
 /** Values lead, series names follow, keyed by a short colour stroke. */
 function TooltipCard({ title, rows, currency }: { title: string; rows: TooltipRow[]; currency: string }) {
   return (
-    <div className="min-w-36 rounded-2xl bg-night px-3.5 py-2.5 text-white shadow-float">
-      <p className="text-xs text-white/60">{title}</p>
+    <div className="min-w-36 rounded-2xl bg-ink px-3.5 py-2.5 text-canvas shadow-float">
+      <p className="text-xs text-canvas/60">{title}</p>
       {rows.map((row) => (
         <p key={row.name} className="mt-1 flex items-center gap-2 text-sm">
           <span aria-hidden className="h-0.5 w-3 rounded-full" style={{ backgroundColor: row.color }} />
           <span className="font-semibold tabular-nums">{formatMoney(row.value, currency)}</span>
-          <span className="text-white/60">{row.name}</span>
+          <span className="text-canvas/60">{row.name}</span>
         </p>
       ))}
     </div>

@@ -8,6 +8,7 @@ import { timeAgo } from "@/lib/format";
 import type { AppNotification } from "@/lib/types";
 
 import { useData } from "./data-provider";
+import { useSheetDrag } from "./sheet-drag";
 import { IconTile, cx } from "./ui";
 
 const LIMITS_PATH = "/settings#limits";
@@ -25,6 +26,7 @@ export function NotificationDrawer() {
   } = useData();
   const router = useRouter();
   const panelRef = useRef<HTMLDivElement>(null);
+  const { backdropRef, grabProps } = useSheetDrag(panelRef, closeNotifications);
   const closeRef = useRef<HTMLButtonElement>(null);
   const review = txns.filter((t) => !t.is_parsed).length;
 
@@ -73,7 +75,7 @@ export function NotificationDrawer() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end sm:items-stretch sm:justify-end">
-      <div className="animate-fade absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={closeNotifications} aria-hidden />
+      <div ref={backdropRef} className="animate-fade absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={closeNotifications} aria-hidden />
       <div
         ref={panelRef}
         role="dialog"
@@ -81,31 +83,34 @@ export function NotificationDrawer() {
         aria-labelledby="notifications-title"
         className="animate-sheet relative flex max-h-[85dvh] w-full flex-col rounded-t-[32px] bg-canvas pb-[max(env(safe-area-inset-bottom),1rem)] shadow-float sm:max-h-none sm:w-[400px] sm:rounded-l-[32px] sm:rounded-tr-none sm:pb-6"
       >
-        <span className="mx-auto mt-3 h-1.5 w-10 shrink-0 rounded-full bg-ink/15 sm:hidden" aria-hidden />
-        <header className="flex items-center gap-3 px-5 pt-3 pb-3 sm:pt-7">
-          <h2 id="notifications-title" className="flex-1 text-xl font-semibold tracking-tight text-ink">
-            Notifications
-            {inbox.unread ? <span className="ml-2 align-middle text-sm font-medium text-ink-2">{inbox.unread} new</span> : null}
-          </h2>
-          {inbox.unread ? (
+        {/* Grabber and title: swipe down here to close (phones). */}
+        <div {...grabProps} className="flex shrink-0 touch-none flex-col select-none">
+          <span className="mx-auto mt-3 h-1.5 w-10 shrink-0 rounded-full bg-ink/15 sm:hidden" aria-hidden />
+          <header className="flex items-center gap-3 px-5 pt-3 pb-3 sm:pt-7">
+            <h2 id="notifications-title" className="flex-1 text-xl font-semibold tracking-tight text-ink">
+              Notifications
+              {inbox.unread ? <span className="ml-2 align-middle text-sm font-medium text-ink-2">{inbox.unread} new</span> : null}
+            </h2>
+            {inbox.unread ? (
+              <button
+                type="button"
+                onClick={() => void markNotificationsRead()}
+                className="h-9 rounded-full px-3 text-sm font-medium text-violet-strong hover:bg-violet-soft"
+              >
+                Mark all read
+              </button>
+            ) : null}
             <button
+              ref={closeRef}
               type="button"
-              onClick={() => void markNotificationsRead()}
-              className="h-9 rounded-full px-3 text-sm font-medium text-violet-strong hover:bg-violet-soft"
+              onClick={closeNotifications}
+              aria-label="Close notifications"
+              className="glass relative grid size-9 place-items-center rounded-full text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet"
             >
-              Mark all read
+              <X size={18} />
             </button>
-          ) : null}
-          <button
-            ref={closeRef}
-            type="button"
-            onClick={closeNotifications}
-            aria-label="Close notifications"
-            className="grid size-9 place-items-center rounded-full bg-surface text-ink-2 shadow-card hover:text-ink focus-visible:outline-2 focus-visible:outline-violet"
-          >
-            <X size={18} />
-          </button>
-        </header>
+          </header>
+        </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
           {review ? (
@@ -144,7 +149,7 @@ export function NotificationDrawer() {
               <button
                 type="button"
                 onClick={() => go(LIMITS_PATH)}
-                className="mt-5 h-10 rounded-full bg-night px-5 text-sm font-semibold text-white"
+                className="mt-5 h-10 rounded-full bg-ink px-5 text-sm font-semibold text-canvas"
               >
                 Set spending limits
               </button>

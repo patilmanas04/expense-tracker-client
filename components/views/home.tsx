@@ -70,10 +70,10 @@ export function HomeView() {
                 onClick={openNotifications}
                 aria-label={inbox.unread ? `Notifications, ${inbox.unread} new` : "Notifications"}
                 aria-haspopup="dialog"
-                className="relative grid size-11 shrink-0 place-items-center rounded-full bg-white/20 backdrop-blur-md transition hover:bg-white/30"
+                className="glass-on-color relative grid size-11 shrink-0 place-items-center rounded-full transition active:scale-95"
               >
                 <Bell size={20} fill="currentColor" />
-                {inbox.unread ? <span className="absolute top-2.5 right-2.5 size-2.5 rounded-full bg-[#ff3b30] ring-2 ring-[#a37df9]" /> : null}
+                {inbox.unread ? <span className="absolute top-2.5 right-2.5 size-2.5 rounded-full bg-[#ff3b30] ring-2 ring-(--hero-ring)" /> : null}
               </button>
             </div>
 
@@ -130,11 +130,11 @@ export function HomeView() {
             {insight ? (
               <Link
                 href="/report"
-                className="insight-glow mt-5 flex items-center gap-3 rounded-[28px] bg-night py-3.5 pr-4 pl-5 text-white transition active:scale-[0.99]"
+                className="insight-glow mt-5 flex items-center gap-3 rounded-[28px] bg-insight py-3.5 pr-4 pl-5 text-on-insight transition active:scale-[0.99]"
               >
-                <Sparkles size={22} className="shrink-0 text-[#a98bff]" fill="currentColor" aria-hidden />
+                <Sparkles size={22} className="shrink-0 text-violet" fill="currentColor" aria-hidden />
                 <span className="line-clamp-2 flex-1 text-[15px] leading-snug font-medium">{insight.text}</span>
-                <span className="flex shrink-0 items-center text-[14px] text-white/60">
+                <span className="flex shrink-0 items-center text-[14px] text-on-insight/60">
                   Report <ChevronRight size={16} />
                 </span>
               </Link>
@@ -151,7 +151,7 @@ export function HomeView() {
                   </IconButton>
                   <Link
                     href="/activity"
-                    className="flex h-10 items-center rounded-full bg-violet-soft px-4 text-sm font-medium text-violet-strong hover:bg-[#e9e0ff]"
+                    className="flex h-10 items-center rounded-full bg-violet-soft px-4 text-sm font-medium text-violet-strong hover:bg-violet/15"
                   >
                     See all
                   </Link>

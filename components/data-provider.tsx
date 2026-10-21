@@ -13,20 +13,25 @@ import {
 } from "@/lib/analytics";
 import {
   ApiError,
+  addTransaction as apiAddTransaction,
   clearBalance as apiClearBalance,
+  deleteTransaction as apiDeleteTransaction,
   getAllTransactions,
   getBalance,
+  getLimits,
   getMe,
   getNotifications,
   getTransactionsSince,
   markNotificationsRead as apiMarkNotificationsRead,
   saveBalance as apiSaveBalance,
+  saveLimits as apiSaveLimits,
   signOut as apiSignOut,
 } from "@/lib/api";
 import { dayKey, monthOf } from "@/lib/format";
-import type { Balance, Inbox, User } from "@/lib/types";
+import type { Balance, Inbox, LimitsSummary, NewTransaction, User } from "@/lib/types";
 
-export type Status = "loading" | "signed-out" | "ready" | "error";
+/** "expired": the backend rejected the session cookie; "signed-out": you signed out. */
+export type Status = "loading" | "signed-out" | "expired" | "ready" | "error";
 export type KindFilter = "ALL" | "DEBIT" | "CREDIT" | "REVIEW";
 
 /** A request from another screen to open Activity with a filter applied. */
@@ -58,6 +63,9 @@ interface DataContextValue {
   balance: Balance | null;
   saveBalance: (amount: string) => Promise<void>;
   clearBalance: () => Promise<void>;
+  /** Weekly/monthly spend limits with what's been spent; null until loaded. */
+  limits: LimitsSummary | null;
+  saveLimits: (limits: { weekly_limit: string | null; monthly_limit: string | null }) => Promise<LimitsSummary>;
   /** In-app notifications (bell on Home). */
   inbox: Inbox;
   notificationsOpen: boolean;
@@ -66,6 +74,10 @@ interface DataContextValue {
   openNotifications: () => void;
   closeNotifications: () => void;
   markNotificationsRead: (ids?: string[]) => Promise<void>;
+  /** Adds a transaction by hand; it appears in the lists straight away. */
+  addTransaction: (input: NewTransaction) => Promise<Txn>;
+  /** Deletes a transaction added by hand. */
+  deleteTransaction: (id: string) => Promise<void>;
   selected: Txn | null;
   openTransaction: (id: string) => void;
   closeTransaction: () => void;
@@ -126,11 +138,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [activityRequest, setActivityRequest] = useState<ActivityRequest | null>(null);
   const [balance, setBalance] = useState<Balance | null>(null);
   const [inbox, setInbox] = useState<Inbox>(EMPTY_INBOX);
+  const [limits, setLimits] = useState<LimitsSummary | null>(null);
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
   const lastSyncedRef = useRef(0);
   const cursorRef = useRef(EPOCH); // newest created_at already loaded
   const pollFailures = useRef(0);
+  const limitsTxns = useRef<Txn[] | null>(null); // transactions the limits were last loaded for
+  const deletedIds = useRef(new Set<string>()); // so a poll already in flight can't bring one back
 
   const apply = useCallback((result: LoadResult, initial: boolean) => {
     if (result.kind === "ok") {
@@ -150,7 +165,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } else if (result.kind === "signed-out") {
       setUser(null);
       setTxns([]);
-      setStatus("signed-out");
+      setStatus("expired");
     } else {
       setError(result.message);
       if (initial) setStatus("error"); // otherwise keep showing the last good data
@@ -170,6 +185,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [apply],
   );
 
+  // Optional, like the balance: a failure keeps the last value and never blocks the dashboard.
+  const loadLimits = useCallback(
+    () =>
+      getLimits().then(
+        (next) => setLimits((current) => (same(current, next) ? current : next)),
+        () => {}, // keep what we have
+      ),
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
     inFlight.current = true;
@@ -177,10 +202,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
       inFlight.current = false;
       if (!cancelled) apply(result, true);
     });
+    // In parallel, so Settings opens with the meters already filled in.
+    void loadLimits();
     return () => {
       cancelled = true;
     };
-  }, [apply]);
+  }, [apply, loadLimits]);
+
+  // New SMS change what's been spent: refresh the meters (the first load already has them).
+  useEffect(() => {
+    if (status !== "ready") return;
+    if (limitsTxns.current !== null && limitsTxns.current !== txns) void loadLimits();
+    limitsTxns.current = txns;
+  }, [status, txns, loadLimits]);
 
   // Coming back to the tab/home-screen app picks up SMS that arrived meanwhile.
   useEffect(() => {
@@ -208,8 +242,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
         getNotifications().catch(() => undefined),
       ]);
       pollFailures.current = 0;
-      if (fresh.length) {
-        setTxns((current) => mergeTransactions(current, fresh));
+      const kept = fresh.filter((t) => !deletedIds.current.has(t.id));
+      if (kept.length) {
+        setTxns((current) => mergeTransactions(current, kept));
         const newest = latestCreatedAt(prepare(fresh));
         if (newest && Date.parse(newest) > Date.parse(cursorRef.current)) cursorRef.current = newest;
       }
@@ -221,7 +256,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       if (e instanceof ApiError && e.status === 401) {
         setUser(null);
         setTxns([]);
-        setStatus("signed-out");
+        setStatus("expired");
       } else if (++pollFailures.current >= POLL_FAILURES_BEFORE_ALERT) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
       }
@@ -249,6 +284,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setTxns([]);
       setBalance(null);
       setInbox(EMPTY_INBOX);
+      setLimits(null);
       setSelectedId(null);
       setStatus("signed-out");
     }
@@ -262,6 +298,41 @@ export function DataProvider({ children }: { children: ReactNode }) {
     await apiClearBalance();
     setBalance(null);
   }, []);
+
+  const saveLimits = useCallback(async (body: { weekly_limit: string | null; monthly_limit: string | null }) => {
+    const next = await apiSaveLimits(body);
+    setLimits(next);
+    return next;
+  }, []);
+
+  // The balance moves with a bank entry; the next poll would catch it, this is just sooner.
+  const reloadBalance = useCallback(
+    () => getBalance().then((next) => setBalance((current) => (same(current, next) ? current : next)), () => {}),
+    [],
+  );
+
+  const addTransaction = useCallback(
+    async (input: NewTransaction) => {
+      const created = await apiAddTransaction(input);
+      const [txn] = prepare([created]); // normalises the timestamps, as for polled rows
+      setTxns((current) => mergeTransactions(current, [created]));
+      if (Date.parse(txn.created_at) > Date.parse(cursorRef.current)) cursorRef.current = txn.created_at;
+      void reloadBalance();
+      return txn;
+    },
+    [reloadBalance],
+  );
+
+  const deleteTransaction = useCallback(
+    async (id: string) => {
+      await apiDeleteTransaction(id);
+      deletedIds.current.add(id);
+      setSelectedId((current) => (current === id ? null : current));
+      setTxns((current) => current.filter((t) => t.id !== id));
+      void reloadBalance();
+    },
+    [reloadBalance],
+  );
 
   const markNotificationsRead = useCallback(async (ids?: string[]) => {
     // Optimistic: the next poll corrects it if the request fails.
@@ -296,12 +367,16 @@ export function DataProvider({ children }: { children: ReactNode }) {
       balance,
       saveBalance,
       clearBalance,
+      limits,
+      saveLimits,
       inbox,
       notificationsOpen: notificationsOpenedAt > 0,
       notificationsOpenedAt,
       openNotifications: () => setNotificationsOpenedAt(Date.now()),
       closeNotifications: () => setNotificationsOpenedAt(0),
       markNotificationsRead,
+      addTransaction,
+      deleteTransaction,
       selected: (selectedId && txns.find((t) => t.id === selectedId)) || null,
       openTransaction: setSelectedId,
       closeTransaction: () => setSelectedId(null),
@@ -322,9 +397,13 @@ export function DataProvider({ children }: { children: ReactNode }) {
       balance,
       saveBalance,
       clearBalance,
+      limits,
+      saveLimits,
       inbox,
       notificationsOpenedAt,
       markNotificationsRead,
+      addTransaction,
+      deleteTransaction,
       selectedId,
       activityRequest,
     ],

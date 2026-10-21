@@ -65,6 +65,15 @@ const META: Record<string, CategoryMeta> = {
   Transfer: { color: PALETTE.slate, icon: ArrowLeftRight },
 };
 
+/** Every category, in the same order as the backend's list. */
+export const CATEGORY_NAMES = Object.keys(META);
+
+/** `account_ref` of a transaction added by hand and paid in cash (matches balance.py). */
+export const CASH_ACCOUNT = "Cash";
+
+/** `parsed_by` of a transaction added by hand. */
+export const MANUAL = "manual";
+
 const FALLBACK: CategoryMeta = { color: PALETTE.gray, icon: CircleHelp };
 
 export const categoryName = (t: { category: string | null }) => t.category || UNCATEGORIZED;

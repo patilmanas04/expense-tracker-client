@@ -1,9 +1,9 @@
 "use client";
 
 import { Check, Landmark, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
-import { getLimits, saveLimits, sendTestEmail } from "@/lib/api";
+import { sendTestEmail } from "@/lib/api";
 import {
   dateTimeLabel,
   formatMoney,
@@ -13,11 +13,12 @@ import {
   shortDayLabel,
   toMinor,
 } from "@/lib/format";
-import type { LimitsSummary, PeriodLimit } from "@/lib/types";
+import type { PeriodLimit } from "@/lib/types";
 
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
-import { Amount, Avatar, Card, ProgressBar, SelectPill } from "../ui";
+import { useTheme, type Theme } from "../theme";
+import { Amount, Avatar, Card, ProgressBar, Segmented, SelectPill } from "../ui";
 
 export function SettingsView() {
   const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut } = useData();
@@ -69,6 +70,8 @@ export function SettingsView() {
           </Row>
         ) : null}
       </Group>
+
+      <AppearanceSection />
 
       <Group title="Use Folio like an app">
         <div className="flex gap-4 p-4">
@@ -188,7 +191,7 @@ function BalanceSection() {
               </p>
             ) : null}
             <div className="mt-4 flex gap-2">
-              <button type="submit" disabled={busy} className="h-11 rounded-full bg-night px-5 text-[15px] font-semibold text-white disabled:opacity-60">
+              <button type="submit" disabled={busy} className="h-11 rounded-full bg-ink px-5 text-[15px] font-semibold text-canvas disabled:opacity-60">
                 {busy ? "Saving…" : "Save balance"}
               </button>
               {balance ? (
@@ -256,37 +259,29 @@ const limitText = (value: number | null) => (value === null ? "" : String(value)
 
 /** Weekly/monthly spend limits; reaching one sends an email (Gmail OAuth on the server). */
 function LimitsSection() {
-  const { txns } = useData();
-  const [summary, setSummary] = useState<LimitsSummary | null>(null);
-  const [weekly, setWeekly] = useState("");
-  const [monthly, setMonthly] = useState("");
+  // Loaded with the rest of the app (and refreshed as SMS arrive), so it's ready on arrival.
+  const { limits: summary, saveLimits } = useData();
+  const [weekly, setWeekly] = useState(() => limitText(summary?.weekly.limit ?? null));
+  const [monthly, setMonthly] = useState(() => limitText(summary?.monthly.limit ?? null));
+  const [dirty, setDirty] = useState(false);
+  const [shown, setShown] = useState(summary);
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
-  const dirty = useRef(false);
 
-  // Reload whenever new transactions arrive (5-second polling) so the meters stay live.
-  useEffect(() => {
-    let cancelled = false;
-    getLimits()
-      .then((next) => {
-        if (cancelled) return;
-        setSummary(next);
-        if (!dirty.current) {
-          setWeekly(limitText(next.weekly.limit));
-          setMonthly(limitText(next.monthly.limit));
-        }
-      })
-      .catch(() => {});
-    return () => {
-      cancelled = true;
-    };
-  }, [txns]);
+  // Fill the form when the limits arrive or change, unless you're in the middle of editing it.
+  if (summary !== shown) {
+    setShown(summary);
+    if (summary && !dirty) {
+      setWeekly(limitText(summary.weekly.limit));
+      setMonthly(limitText(summary.monthly.limit));
+    }
+  }
 
   const edit = (setter: (value: string) => void) => (value: string) => {
-    dirty.current = true;
+    setDirty(true);
     setSaved(false);
     setter(value);
   };
@@ -310,8 +305,7 @@ function LimitsSection() {
     setFormError(null);
     try {
       const next = await saveLimits(body);
-      setSummary(next);
-      dirty.current = false;
+      setDirty(false);
       setWeekly(limitText(next.weekly.limit));
       setMonthly(limitText(next.monthly.limit));
       setSaved(true);
@@ -364,7 +358,7 @@ function LimitsSection() {
             </p>
           ) : null}
           <div className="mt-4 flex items-center gap-3">
-            <button type="submit" disabled={saving} className="h-11 rounded-full bg-night px-5 text-[15px] font-semibold text-white disabled:opacity-60">
+            <button type="submit" disabled={saving} className="h-11 rounded-full bg-ink px-5 text-[15px] font-semibold text-canvas disabled:opacity-60">
               {saving ? "Saving…" : "Save limits"}
             </button>
             {saved ? (
@@ -475,6 +469,27 @@ function LimitField({ id, label, value, onChange }: { id: string; label: string;
         />
       </div>
     </div>
+  );
+}
+
+const THEME_OPTIONS: { value: Theme; label: string }[] = [
+  { value: "system", label: "System" },
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+];
+
+/** Light / dark / follow the phone. Saved on this device only. */
+function AppearanceSection() {
+  const { theme, resolved, setTheme } = useTheme();
+  return (
+    <Group title="Appearance">
+      <div className="p-4">
+        <Segmented label="Theme" value={theme} onChange={setTheme} options={THEME_OPTIONS} />
+        <p className="mt-2.5 text-[13px] text-ink-2">
+          {theme === "system" ? `Follows your phone's setting, currently ${resolved}.` : `Always ${theme}, on this device.`}
+        </p>
+      </div>
+    </Group>
   );
 }
 

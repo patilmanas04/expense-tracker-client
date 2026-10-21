@@ -47,8 +47,8 @@ export function ReportView() {
     <div className="mx-auto max-w-6xl px-4 pt-safe sm:px-6 lg:px-8 lg:pt-8">
       <header className="flex items-center justify-between gap-3 pt-2">
         <div className="flex min-w-0 items-center gap-3">
-          <Link href="/" aria-label="Back to home" className="grid size-10 place-items-center rounded-full text-ink hover:bg-surface lg:hidden">
-            <ArrowLeft size={24} />
+          <Link href="/" aria-label="Back to home" className="glass relative grid size-10 place-items-center rounded-full text-ink transition active:scale-95 lg:hidden">
+            <ArrowLeft size={20} strokeWidth={2.4} />
           </Link>
           <h1 className="truncate text-[22px] font-semibold tracking-tight text-ink lg:text-3xl">Report</h1>
         </div>

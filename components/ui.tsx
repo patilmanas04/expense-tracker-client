@@ -125,8 +125,8 @@ export function SelectPill({
         "relative inline-flex min-w-0 cursor-pointer items-center rounded-full font-medium transition focus-within:ring-2",
         size === "sm" ? "h-8 gap-1 px-3 text-[13px]" : "h-10 gap-1.5 px-4 text-sm",
         variant === "glass"
-          ? "bg-white/20 text-white backdrop-blur-md hover:bg-white/25 focus-within:ring-white/60"
-          : "border border-line bg-surface text-ink shadow-card hover:bg-white focus-within:ring-violet/40",
+          ? "glass-on-color text-white focus-within:ring-white/60"
+          : "border border-line bg-surface text-ink shadow-card hover:bg-raised focus-within:ring-violet/40",
         className,
       )}
     >
@@ -164,7 +164,7 @@ export function Segmented<T extends string>({
   className?: string;
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className={cx("flex rounded-full bg-[#ebebee] p-1", className)}>
+    <div role="radiogroup" aria-label={label} className={cx("flex rounded-full bg-track p-1", className)}>
       {options.map((o) => {
         const active = o.value === value;
         return (
@@ -176,7 +176,7 @@ export function Segmented<T extends string>({
             onClick={() => onChange(o.value)}
             className={cx(
               "h-10 flex-1 rounded-full text-[15px] font-medium transition",
-              active ? "bg-surface text-ink shadow-card" : "text-ink-2 hover:text-ink",
+              active ? "bg-raised text-ink shadow-card" : "text-ink-2 hover:text-ink",
             )}
           >
             {o.label}
@@ -285,7 +285,7 @@ export function InfoTip({ label, text }: { label: string; text: string }) {
         <span
           id={bubbleId}
           role="note"
-          className="animate-fade absolute top-[calc(100%-0.5rem)] right-2 left-2 z-30 rounded-2xl bg-night px-3.5 py-2.5 text-left text-[13px] leading-snug font-normal text-white shadow-float"
+          className="animate-fade absolute top-[calc(100%-0.5rem)] right-2 left-2 z-30 rounded-2xl bg-ink px-3.5 py-2.5 text-left text-[13px] leading-snug font-normal text-canvas shadow-float"
         >
           {text}
         </span>

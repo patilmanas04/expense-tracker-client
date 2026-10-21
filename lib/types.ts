@@ -19,6 +19,20 @@ export interface Transaction {
   created_at: string;
 }
 
+/** Mirrors `ManualTransactionInput` in the backend's main.py. */
+export interface NewTransaction {
+  type: TxType;
+  /** Plain decimal string, e.g. "249.50". */
+  amount: string;
+  merchant: string;
+  /** null = picked from the name by the same rules as bank SMS. */
+  category: string | null;
+  /** ISO timestamp with offset. */
+  transaction_time: string;
+  /** Cash never changes the bank balance. */
+  paid_with: "bank" | "cash";
+}
+
 /** Mirrors `BalanceSummary` in the backend's balance.py. */
 export interface Balance {
   opening_balance: number;

@@ -338,6 +338,6 @@ export function currencies(txns: Txn[]): string[] {
 export const parsedByLabel = (t: Pick<Transaction, "parsed_by" | "is_parsed">) =>
   !t.is_parsed
     ? "Needs review"
-    : ({ regex: "Bank SMS rules", "regex+ai": "Rules + AI category", ai_agent: "AI parsed" } as Record<string, string>)[
+    : ({ regex: "Bank SMS rules", "regex+ai": "Rules + AI category", ai_agent: "AI parsed", manual: "You, by hand" } as Record<string, string>)[
         t.parsed_by
       ] ?? t.parsed_by;

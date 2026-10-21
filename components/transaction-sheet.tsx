@@ -1,19 +1,21 @@
 "use client";
 
-import { Check, Copy, MessageSquareText, X } from "lucide-react";
+import { Check, Copy, MessageSquareText, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { parsedByLabel } from "@/lib/analytics";
-import { categoryName } from "@/lib/categories";
+import { MANUAL, categoryName } from "@/lib/categories";
 import { dateTimeLabel, formatMoney } from "@/lib/format";
 
 import { useData } from "./data-provider";
+import { useSheetDrag } from "./sheet-drag";
 import { transactionTitle } from "./transactions";
 import { Amount, CategoryTile, cx } from "./ui";
 
 export function TransactionSheet() {
   const { selected: t, closeTransaction } = useData();
   const dialogRef = useRef<HTMLDivElement>(null);
+  const { backdropRef, grabProps } = useSheetDrag(dialogRef, closeTransaction);
   const closeRef = useRef<HTMLButtonElement>(null);
   const [copied, setCopied] = useState(false);
 
@@ -49,6 +51,7 @@ export function TransactionSheet() {
   if (!t) return null;
 
   const debit = t.type === "DEBIT";
+  const manual = t.parsed_by === MANUAL;
   const copyReference = async () => {
     if (!t.reference_id) return;
     try {
@@ -61,7 +64,7 @@ export function TransactionSheet() {
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
-      <div className="animate-fade absolute inset-0 bg-ink/40 backdrop-blur-[2px]" onClick={closeTransaction} aria-hidden />
+      <div ref={backdropRef} className="animate-fade absolute inset-0 bg-black/45 backdrop-blur-[2px]" onClick={closeTransaction} aria-hidden />
       <div
         ref={dialogRef}
         role="dialog"
@@ -69,14 +72,15 @@ export function TransactionSheet() {
         aria-labelledby="txn-title"
         className="animate-sheet relative max-h-[92dvh] w-full overflow-y-auto rounded-t-[32px] bg-canvas pb-[max(env(safe-area-inset-bottom),1.25rem)] shadow-float sm:max-w-md sm:rounded-[32px] sm:pb-5"
       >
-        <div className="sticky top-0 z-10 flex items-center justify-between bg-canvas/90 px-5 pt-3 pb-2 backdrop-blur">
+        {/* Grabber: swipe down here to close (phones). */}
+        <div {...grabProps} className="sticky top-0 z-10 flex touch-none items-center justify-between select-none bg-canvas/90 px-5 pt-3 pb-3 backdrop-blur">
           <span className="mx-auto h-1.5 w-10 rounded-full bg-ink/15 sm:hidden" aria-hidden />
           <button
             ref={closeRef}
             type="button"
             onClick={closeTransaction}
             aria-label="Close details"
-            className="absolute top-3 right-4 grid size-9 place-items-center rounded-full bg-surface text-ink-2 shadow-card hover:text-ink focus-visible:outline-2 focus-visible:outline-violet"
+            className="absolute top-3 right-4 grid size-9 place-items-center rounded-full glass text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet"
           >
             <X size={18} />
           </button>
@@ -96,7 +100,7 @@ export function TransactionSheet() {
                 className={cx("mt-1 text-4xl font-bold tracking-tight", debit ? "text-ink" : "text-income")}
               />
             ) : (
-              <p className="mt-2 rounded-full bg-[#fff6db] px-3 py-1 text-sm font-medium text-[#9a6700]">
+              <p className="mt-2 rounded-full bg-warn-soft px-3 py-1 text-sm font-medium text-warn">
                 Couldn&apos;t read this SMS automatically
               </p>
             )}
@@ -122,17 +126,82 @@ export function TransactionSheet() {
               </Row>
             ) : null}
             {t.sender ? <Row label="Sender">{t.sender}</Row> : null}
-            <Row label="Read by">{parsedByLabel(t)}</Row>
+            <Row label={manual ? "Added by" : "Read by"}>{parsedByLabel(t)}</Row>
           </dl>
 
-          <div className="mt-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
-            <p className="mb-2 flex items-center gap-2 text-sm font-medium text-ink-2">
-              <MessageSquareText size={16} aria-hidden /> Original SMS
-            </p>
-            <p className="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-ink">{t.raw_message}</p>
-          </div>
+          {manual ? (
+            <DeleteManual key={t.id} id={t.id} />
+          ) : (
+            <div className="mt-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
+              <p className="mb-2 flex items-center gap-2 text-sm font-medium text-ink-2">
+                <MessageSquareText size={16} aria-hidden /> Original SMS
+              </p>
+              <p className="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-ink">{t.raw_message}</p>
+            </div>
+          )}
         </div>
       </div>
+    </div>
+  );
+}
+
+/** Transactions added by hand can be deleted (bank SMS can't): a second tap confirms. */
+function DeleteManual({ id }: { id: string }) {
+  const { deleteTransaction } = useData();
+  const [confirming, setConfirming] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const remove = async () => {
+    setDeleting(true);
+    setError(null);
+    try {
+      await deleteTransaction(id); // closes this sheet
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't delete it.");
+      setDeleting(false);
+    }
+  };
+
+  return (
+    <div className="mt-4">
+      {confirming ? (
+        <div className="rounded-card border border-expense/30 bg-surface p-4 shadow-card">
+          <p className="text-sm font-medium text-ink">Delete this transaction?</p>
+          <p className="mt-0.5 text-[13px] text-ink-2">It comes off your totals, limits and balance. This can&apos;t be undone.</p>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={remove}
+              disabled={deleting}
+              className="h-10 flex-1 rounded-full bg-expense text-sm font-semibold text-canvas disabled:opacity-60"
+            >
+              {deleting ? "Deleting…" : "Delete"}
+            </button>
+            <button
+              type="button"
+              onClick={() => setConfirming(false)}
+              disabled={deleting}
+              className="h-10 flex-1 rounded-full border border-line bg-surface text-sm font-medium text-ink"
+            >
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          onClick={() => setConfirming(true)}
+          className="flex h-11 w-full items-center justify-center gap-2 rounded-full border border-expense/30 bg-surface text-[15px] font-medium text-expense"
+        >
+          <Trash2 size={17} aria-hidden /> Delete transaction
+        </button>
+      )}
+      {error ? (
+        <p role="alert" className="mt-2 text-center text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

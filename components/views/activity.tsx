@@ -1,12 +1,13 @@
 "use client";
 
-import { Search, SearchX, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Check, Plus, Search, SearchX, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { counts } from "@/lib/analytics";
+import { counts, type Txn } from "@/lib/analytics";
 import { categoryName } from "@/lib/categories";
 import { formatMoney, monthLabel } from "@/lib/format";
 
+import { AddTransactionSheet } from "../add-transaction";
 import { useData, type KindFilter } from "../data-provider";
 import { TransactionGroups } from "../transactions";
 import { Card, SelectPill, cx } from "../ui";
@@ -22,6 +23,10 @@ export function ActivityView() {
   const [period, setPeriod] = useState(ALL);
   const [visible, setVisible] = useState(PAGE);
   const [appliedNonce, setAppliedNonce] = useState<number | null>(null);
+  const [adding, setAdding] = useState(false);
+  const [added, setAdded] = useState<Txn | null>(null);
+  // Stable, so a live update re-rendering this page doesn't reset focus inside the open sheet.
+  const closeAdd = useCallback(() => setAdding(false), []);
   const searchRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
@@ -73,6 +78,13 @@ export function ActivityView() {
     );
   }, [txns, query, kind, category, period, searchable]);
 
+  // The confirmation under the header fades after a few seconds.
+  useEffect(() => {
+    if (!added) return;
+    const id = window.setTimeout(() => setAdded(null), 4000);
+    return () => window.clearTimeout(id);
+  }, [added]);
+
   const summary = useMemo(() => {
     let spent = 0;
     let received = 0;
@@ -104,6 +116,18 @@ export function ActivityView() {
   };
   const filtersActive = query || kind !== "ALL" || category !== ALL || period !== ALL;
 
+  const onAdded = (txn: Txn) => {
+    setAdded(txn);
+    // Don't let the current filters hide what you just added.
+    const visible =
+      (period === ALL || txn.month === period) &&
+      (kind === "ALL" || kind === txn.type) &&
+      (category === ALL || categoryName(txn) === category) &&
+      !query.trim();
+    if (!visible) resetFilters();
+    setVisible(PAGE);
+  };
+
   const chips: { value: KindFilter; label: string }[] = [
     { value: "ALL", label: "All" },
     { value: "DEBIT", label: "Expenses" },
@@ -113,12 +137,31 @@ export function ActivityView() {
 
   return (
     <div className="mx-auto max-w-3xl px-4 pt-safe sm:px-6 lg:px-8 lg:pt-8">
-      <header className="flex items-end justify-between gap-3 pt-2">
+      <header className="flex items-center justify-between gap-3 pt-2">
         <h1 className="text-[22px] font-semibold tracking-tight text-ink lg:text-3xl">Activity</h1>
-        <p className="pb-0.5 text-sm text-ink-2">
-          {filtered.length} of {txns.length}
-        </p>
+        <div className="flex items-center gap-3">
+          <p className="text-sm text-ink-2">
+            {filtered.length} of {txns.length}
+          </p>
+          <button
+            type="button"
+            onClick={() => setAdding(true)}
+            aria-haspopup="dialog"
+            className="flex h-10 items-center gap-1.5 rounded-full bg-ink pr-4 pl-3 text-sm font-semibold text-canvas transition active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet"
+          >
+            <Plus size={18} strokeWidth={2.4} aria-hidden /> Add
+          </button>
+        </div>
       </header>
+
+      {added ? (
+        <p role="status" className="animate-fade mt-3 flex items-center gap-2 rounded-2xl bg-income-soft px-4 py-2.5 text-sm font-medium text-income">
+          <Check size={16} aria-hidden />
+          <span className="truncate">
+            Added {added.merchant} · {formatMoney(added.type === "DEBIT" ? -added.minor : added.minor, added.currency, { signed: true })}
+          </span>
+        </p>
+      ) : null}
 
       <div className="relative mt-4">
         <Search size={18} className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-ink-3" aria-hidden />
@@ -162,12 +205,12 @@ export function ActivityView() {
             }}
             className={cx(
               "flex h-8 shrink-0 items-center gap-1 rounded-full px-2.5 text-[13px] font-medium transition",
-              kind === chip.value ? "bg-night text-white" : "border border-line bg-surface text-ink-2 hover:text-ink",
+              kind === chip.value ? "bg-ink text-canvas" : "border border-line bg-surface text-ink-2 hover:text-ink",
             )}
           >
             {chip.label}
             {chip.value === "REVIEW" && reviewCount ? (
-              <span className={cx("rounded-full px-1.5 text-[11px] leading-4", kind === "REVIEW" ? "bg-white/20" : "bg-[#fff6db] text-[#9a6700]")}>
+              <span className={cx("rounded-full px-1.5 text-[11px] leading-4", kind === "REVIEW" ? "bg-canvas/20" : "bg-warn-soft text-warn")}>
                 {reviewCount}
               </span>
             ) : null}
@@ -226,13 +269,13 @@ export function ActivityView() {
             </p>
             <p className="mt-1 text-sm text-ink-2">
               {txns.length === 0
-                ? "Bank SMS forwarded by your iPhone Shortcut will show up here."
+                ? "Bank SMS forwarded by your iPhone Shortcut will show up here. Paid in cash? Tap Add."
                 : kind === "REVIEW"
                   ? "Every SMS so far was read successfully."
                   : "Try a different search or filter."}
             </p>
             {filtersActive && txns.length > 0 ? (
-              <button type="button" onClick={resetFilters} className="mt-4 h-10 rounded-full bg-night px-5 text-sm font-semibold text-white">
+              <button type="button" onClick={resetFilters} className="mt-4 h-10 rounded-full bg-ink px-5 text-sm font-semibold text-canvas">
                 Clear filters
               </button>
             ) : null}
@@ -244,6 +287,8 @@ export function ActivityView() {
           </>
         )}
       </div>
+
+      {adding ? <AddTransactionSheet onClose={closeAdd} onAdded={onAdded} /> : null}
     </div>
   );
 }

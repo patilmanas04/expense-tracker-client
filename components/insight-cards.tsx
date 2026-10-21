@@ -106,7 +106,7 @@ export function PaceCard({ pace, currency }: { pace: Pace; currency: string }) {
           <div className="hatch absolute inset-y-0 left-0 rounded-full" style={{ width: `${projectedPct}%`, color: `${color}99` }} />
           <div className="absolute inset-y-0 left-0 rounded-full" style={{ width: `${spentPct}%`, backgroundColor: color }} />
           <span
-            className="absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-white shadow-card"
+            className="absolute top-1/2 size-5 -translate-x-1/2 -translate-y-1/2 rounded-full border-[3px] border-surface shadow-card"
             style={{ left: `${spentPct}%`, backgroundColor: color }}
           />
         </div>

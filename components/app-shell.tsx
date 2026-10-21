@@ -1,13 +1,13 @@
 "use client";
 
 import { CloudOff, RefreshCw } from "lucide-react";
-import type { ReactNode } from "react";
+import { useRouter } from "next/navigation";
+import { useEffect, type ReactNode } from "react";
 
 import { Wordmark } from "./brand";
 import { useData } from "./data-provider";
 import { BottomNav, Sidebar } from "./nav";
 import { NotificationDrawer } from "./notification-drawer";
-import { SignIn } from "./sign-in";
 import { TransactionSheet } from "./transaction-sheet";
 
 /** Pages render through this gate so the route itself is always part of the static shell. */
@@ -18,8 +18,17 @@ export function Ready({ children }: { children: ReactNode }) {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const { status, error, refresh, refreshing } = useData();
+  const router = useRouter();
+  const leaving = status === "signed-out" || status === "expired";
 
-  if (status === "signed-out") return <SignIn />;
+  // proxy.ts keeps signed-out visitors away; this covers sessions that end while the app
+  // is open (sign out, or the backend rejecting a stale cookie). ?expired=1 stops the proxy
+  // bouncing a stale-but-readable cookie straight back here.
+  useEffect(() => {
+    if (leaving) router.replace(status === "expired" ? "/login?expired=1" : "/login");
+  }, [leaving, status, router]);
+
+  if (leaving) return <div className="min-h-dvh bg-canvas" aria-busy="true" />;
   if (status === "error") {
     return (
       <main className="grid min-h-dvh place-items-center px-6">
@@ -34,7 +43,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             type="button"
             onClick={() => void refresh()}
             disabled={refreshing}
-            className="mt-6 inline-flex h-12 items-center gap-2 rounded-full bg-night px-6 font-semibold text-white disabled:opacity-60"
+            className="mt-6 inline-flex h-12 items-center gap-2 rounded-full bg-ink px-6 font-semibold text-canvas disabled:opacity-60"
           >
             <RefreshCw size={18} className={refreshing ? "animate-spin" : undefined} /> Try again
           </button>
@@ -47,10 +56,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="min-h-dvh lg:pl-64">
       <Sidebar />
       {error ? (
-        <div role="status" className="fixed inset-x-4 top-[max(env(safe-area-inset-top),0.75rem)] z-40 mx-auto flex max-w-md items-center gap-3 rounded-full bg-night py-2 pr-2 pl-4 text-sm text-white shadow-float lg:left-64">
-          <CloudOff size={16} className="shrink-0 text-white/70" />
+        <div role="status" className="fixed inset-x-4 top-[max(env(safe-area-inset-top),0.75rem)] z-40 mx-auto flex max-w-md items-center gap-3 rounded-full bg-ink py-2 pr-2 pl-4 text-sm text-canvas shadow-float lg:left-64">
+          <CloudOff size={16} className="shrink-0 text-canvas/70" />
           <span className="flex-1 truncate">Couldn&apos;t refresh. Showing saved data.</span>
-          <button type="button" onClick={() => void refresh()} className="rounded-full bg-white/15 px-3 py-1 font-medium hover:bg-white/25">
+          <button type="button" onClick={() => void refresh()} className="rounded-full bg-canvas/15 px-3 py-1 font-medium hover:bg-canvas/25">
             Retry
           </button>
         </div>

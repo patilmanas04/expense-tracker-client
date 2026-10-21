@@ -1,7 +1,8 @@
 "use client";
 
-import { ChartPie, CircleAlert, MessageSquareText, Sparkles } from "lucide-react";
-import { useEffect, useState } from "react";
+import { ChartPie, CircleAlert, Info, MessageSquareText, Sparkles } from "lucide-react";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useState } from "react";
 
 import { GOOGLE_SIGN_IN_URL, getAuthConfig } from "@/lib/api";
 
@@ -14,26 +15,15 @@ const ERRORS: Record<string, string> = {
   signin: "Sign-in didn't finish. Please try again.",
 };
 
-/** The backend redirects back with ?error=... after a failed Google sign-in. */
-function readSignInError(): string | null {
-  if (typeof window === "undefined") return null;
-  const code = new URLSearchParams(window.location.search).get("error");
-  return code ? (ERRORS[code] ?? ERRORS.signin) : null;
-}
-
-// Only rendered on the client (after the session check), so reading the URL is safe.
+/** The /login page. proxy.ts sends signed-out visitors here before any dashboard is rendered. */
 export function SignIn() {
   const [enabled, setEnabled] = useState<boolean | null>(null);
-  const [error] = useState(readSignInError);
 
   useEffect(() => {
-    if (window.location.search) window.history.replaceState(null, "", window.location.pathname);
     getAuthConfig()
       .then((config) => setEnabled(config.google_enabled))
       .catch(() => setEnabled(false));
   }, []);
-
-  const notConfigured = enabled === false && !error;
 
   return (
     <main className="flex min-h-dvh flex-col lg:flex-row">
@@ -69,18 +59,16 @@ export function SignIn() {
           <h2 className="text-2xl font-semibold tracking-tight text-ink">Sign in</h2>
           <p className="mt-2 text-[15px] text-ink-2">This is a private dashboard. Use the Google account set as its owner.</p>
 
-          {error || notConfigured ? (
-            <p role="alert" className="mt-6 flex gap-2.5 rounded-2xl bg-coral-soft p-4 text-sm text-[#a3361d]">
-              <CircleAlert size={18} className="mt-0.5 shrink-0" />
-              {error ?? ERRORS.configuration}
-            </p>
-          ) : null}
+          {/* Reads the URL, so it streams in after the static shell. */}
+          <Suspense fallback={null}>
+            <SignInNotice googleEnabled={enabled} />
+          </Suspense>
 
           <a
             href={enabled === false ? undefined : GOOGLE_SIGN_IN_URL}
             aria-disabled={enabled === false}
             className={cx(
-              "insight-glow mt-8 flex h-14 w-full items-center justify-center gap-3 rounded-full bg-night text-[16px] font-semibold text-white transition active:scale-[0.99]",
+              "insight-glow mt-8 flex h-14 w-full items-center justify-center gap-3 rounded-full bg-insight text-[16px] font-semibold text-on-insight transition active:scale-[0.99]",
               enabled === false && "pointer-events-none opacity-40",
             )}
           >
@@ -103,4 +91,30 @@ function GoogleGlyph() {
       <path fill="#EA4335" d="M12 4.8c1.8 0 3.3.6 4.6 1.8l3.4-3.4A11.5 11.5 0 0 0 12 0 12 12 0 0 0 1.4 6.6l4 3.1C6.3 6.9 8.9 4.8 12 4.8Z" />
     </svg>
   );
+}
+
+/**
+ * ?error=... comes back from a failed Google sign-in (via the backend and proxy.ts);
+ * ?expired=1 means the backend no longer accepted the session.
+ */
+function SignInNotice({ googleEnabled }: { googleEnabled: boolean | null }) {
+  const params = useSearchParams();
+  const code = params.get("error");
+  if (code || googleEnabled === false) {
+    return (
+      <p role="alert" className="mt-6 flex gap-2.5 rounded-2xl bg-coral-soft p-4 text-sm text-coral-ink">
+        <CircleAlert size={18} className="mt-0.5 shrink-0" />
+        {code ? (ERRORS[code] ?? ERRORS.signin) : ERRORS.configuration}
+      </p>
+    );
+  }
+  if (params.has("expired")) {
+    return (
+      <p role="status" className="mt-6 flex gap-2.5 rounded-2xl bg-violet-soft p-4 text-sm text-violet-strong">
+        <Info size={18} className="mt-0.5 shrink-0" />
+        Your session ended. Please sign in again.
+      </p>
+    );
+  }
+  return null;
 }

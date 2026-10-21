@@ -67,7 +67,7 @@ export function Donut({
     return (
       <div className="relative mx-auto aspect-square w-full max-w-[280px]">
         <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="size-full" aria-hidden>
-          <circle cx={C} cy={C} r={(OUTER + INNER) / 2} fill="none" stroke="#F1F1F4" strokeWidth={OUTER - INNER} />
+          <circle cx={C} cy={C} r={(OUTER + INNER) / 2} fill="none" stroke="var(--color-track)" strokeWidth={OUTER - INNER} />
         </svg>
         <div className="absolute inset-0 grid place-items-center text-center">
           <p className="max-w-[9rem] text-sm text-ink-2">{centerLabel}: nothing yet</p>
@@ -94,8 +94,8 @@ export function Donut({
       <svg viewBox={`0 0 ${SIZE} ${SIZE}`} className="size-full overflow-visible" role="img" aria-label={`${centerLabel}: ${summary}`}>
         <defs>
           <pattern id={hatchId} width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(-45)">
-            <rect width="7" height="7" fill="#F1F1F4" />
-            <rect width="2.6" height="7" fill="#D9D9DF" />
+            <rect width="7" height="7" fill="var(--color-track)" />
+            <rect width="2.6" height="7" fill="var(--color-ink-3)" fillOpacity="0.35" />
           </pattern>
         </defs>
         {arcs.length === 1 ? (
@@ -138,7 +138,7 @@ export function Donut({
 
       <span
         aria-hidden
-        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-night px-3 py-1.5 text-[13px] font-semibold text-white shadow-float transition-[left,top] duration-200"
+        className="pointer-events-none absolute -translate-x-1/2 -translate-y-1/2 rounded-full bg-ink px-3 py-1.5 text-[13px] font-semibold text-canvas shadow-float transition-[left,top] duration-200"
         style={{ left: `${(px / SIZE) * 100}%`, top: `${(py / SIZE) * 100}%` }}
       >
         {formatPercent(focus.share)}
