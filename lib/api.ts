@@ -1,4 +1,4 @@
-import type { Balance, Inbox, LimitsSummary, NewTransaction, Transaction, User } from "./types";
+import type { Balance, Inbox, LimitsInput, LimitsSummary, NewTransaction, Transaction, TransactionPatch, User } from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -67,8 +67,8 @@ export const markNotificationsRead = (ids?: string[]) =>
     body: JSON.stringify(ids ? { ids } : {}),
   });
 
-/** Decimal strings, or null for "no limit". */
-export const saveLimits = (limits: { weekly_limit: string | null; monthly_limit: string | null }) =>
+/** Sets the overall limit, or one category's. */
+export const saveLimits = (limits: LimitsInput) =>
   request<LimitsSummary>("/api/v1/limits", {
     method: "PUT",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
@@ -83,6 +83,14 @@ export const addTransaction = (input: NewTransaction) =>
     body: JSON.stringify(input),
   });
 
+/** Changes only the fields given; a new category is remembered for the merchant. */
+export const updateTransaction = (id: string, patch: TransactionPatch) =>
+  request<Transaction>(`/api/v1/transactions/${id}`, {
+    method: "PATCH",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+
 /** Only works for transactions added by hand; bank SMS can't be deleted. */
 export const deleteTransaction = (id: string) => request<void>(`/api/v1/transactions/${id}`, { method: "DELETE" });
 
@@ -91,8 +99,9 @@ export const sendTestEmail = () => request<{ status: string; to: string }>("/api
 const PAGE_SIZE = 200; // backend maximum
 
 /** Rows recorded at or after `since` (inclusive); usually an empty list. Used for 5-second polling. */
+/** Rows added or changed since `since`: new SMS, edits, and categories filled in later. */
 export const getTransactionsSince = (since: string) =>
-  request<Transaction[]>(`/api/v1/transactions?limit=${PAGE_SIZE}&created_after=${encodeURIComponent(since)}`);
+  request<Transaction[]>(`/api/v1/transactions?limit=${PAGE_SIZE}&updated_after=${encodeURIComponent(since)}`);
 
 /** Every transaction the owner can see, newest first. */
 export async function getAllTransactions(): Promise<Transaction[]> {

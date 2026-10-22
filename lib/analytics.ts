@@ -35,6 +35,7 @@ export function prepare(list: Transaction[]): Txn[] {
       ...t,
       transaction_time: iso,
       created_at: asUtc(t.created_at),
+      updated_at: asUtc(t.updated_at ?? t.created_at),
       minor: toMinor(t.amount),
       day,
       month: monthOf(day),
@@ -44,22 +45,30 @@ export function prepare(list: Transaction[]): Txn[] {
   return out.sort((a, b) => b.time - a.time);
 }
 
-/** Adds newly polled rows; returns the same array when nothing is new so React skips re-rendering. */
+/**
+ * Adds new rows and swaps in changed ones (edited, or categorised later). Unchanged rows keep
+ * their object, and nothing new returns the same array, so React skips re-rendering.
+ */
 export function mergeTransactions(current: Txn[], fresh: Transaction[]): Txn[] {
-  const known = new Set(current.map((t) => t.id));
-  const added = prepare(fresh.filter((t) => !known.has(t.id)));
-  return added.length ? [...added, ...current].sort((a, b) => b.time - a.time) : current;
+  const byId = new Map(current.map((t) => [t.id, t]));
+  let changed = false;
+  for (const t of prepare(fresh)) {
+    if (byId.get(t.id)?.updated_at === t.updated_at) continue;
+    byId.set(t.id, t);
+    changed = true;
+  }
+  return changed ? [...byId.values()].sort((a, b) => b.time - a.time) : current;
 }
 
-/** Newest `created_at` seen; the polling cursor. */
-export function latestCreatedAt(txns: Txn[]): string | null {
+/** Newest `updated_at` seen; the polling cursor. */
+export function latestUpdatedAt(txns: Txn[]): string | null {
   let latest: string | null = null;
   let latestTime = -Infinity;
   for (const t of txns) {
-    const time = Date.parse(t.created_at);
+    const time = Date.parse(t.updated_at);
     if (time > latestTime) {
       latestTime = time;
-      latest = t.created_at;
+      latest = t.updated_at;
     }
   }
   return latest;
@@ -338,6 +347,16 @@ export function currencies(txns: Txn[]): string[] {
 export const parsedByLabel = (t: Pick<Transaction, "parsed_by" | "is_parsed">) =>
   !t.is_parsed
     ? "Needs review"
-    : ({ regex: "Bank SMS rules", "regex+ai": "Rules + AI category", ai_agent: "AI parsed", manual: "You, by hand" } as Record<string, string>)[
+    : (
+        {
+          regex: "Bank SMS rules",
+          "regex+ai": "Rules + AI category",
+          "regex+user": "Rules + your category",
+          "regex+history": "Rules + past payments",
+          ai_agent: "AI parsed",
+          manual: "You, by hand",
+          edited: "You, from the SMS",
+        } as Record<string, string>
+      )[
         t.parsed_by
       ] ?? t.parsed_by;

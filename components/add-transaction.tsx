@@ -1,27 +1,13 @@
 "use client";
 
-import { ChevronDown, X } from "lucide-react";
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
 
 import type { Txn } from "@/lib/analytics";
-import { CATEGORY_NAMES } from "@/lib/categories";
-import { parseAmountInput } from "@/lib/format";
-import type { TxType } from "@/lib/types";
 
 import { useData } from "./data-provider";
 import { useSheetDrag } from "./sheet-drag";
-import { Segmented } from "./ui";
-
-const AUTO = "";
-const FIELD =
-  "h-12 w-full rounded-2xl border border-line bg-surface px-4 text-[16px] text-ink outline-none placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15";
-
-/** "2026-10-22T14:05" in this device's time zone, for <input type="datetime-local">. */
-function localInputValue(ms: number) {
-  const d = new Date(ms);
-  const pad = (n: number) => String(n).padStart(2, "0");
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
+import { AUTO, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 
 /** Add a transaction by hand (cash, or anything without an SMS): bottom sheet on phones, dialog on desktop. */
 export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void; onAdded: (txn: Txn) => void }) {
@@ -30,19 +16,20 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
   const amountRef = useRef<HTMLInputElement>(null);
   const { backdropRef, grabProps } = useSheetDrag(sheetRef, onClose);
   const [openedAt] = useState(() => Date.now());
-  const [type, setType] = useState<TxType>("DEBIT");
-  const [amount, setAmount] = useState("");
-  const [merchant, setMerchant] = useState("");
-  const [category, setCategory] = useState(AUTO);
-  const [when, setWhen] = useState(() => localInputValue(openedAt));
-  const [paidWith, setPaidWith] = useState<"bank" | "cash">("bank");
+  const [draft, setDraft] = useState<Draft>(() => ({
+    type: "DEBIT",
+    amount: "",
+    merchant: "",
+    category: AUTO,
+    when: localInputValue(openedAt),
+    paidWith: "bank",
+  }));
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keyboard, setKeyboard] = useState(0);
-  const debit = type === "DEBIT";
-  /** Any edit clears the last error; it's re-checked on submit. */
-  const edit = (setter: (value: string) => void) => (value: string) => {
-    setter(value);
+  // Any change clears the last error; it's re-checked on submit.
+  const change = (patch: Partial<Draft>) => {
+    setDraft((current) => ({ ...current, ...patch }));
     setError(null);
   };
 
@@ -88,24 +75,20 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const value = parseAmountInput(amount);
-    if (value === null || Number(value) <= 0) return setError("Enter an amount, like 250 or 249.50.");
-    const name = merchant.trim();
-    if (!name) return setError(debit ? "Enter who you paid." : "Enter who paid you.");
+    const checked = readDraft(draft);
+    if ("error" in checked) return setError(checked.error);
     // Untouched means "now": send the exact time, not the minute the sheet opened.
-    const time = when === localInputValue(openedAt) ? new Date() : new Date(when);
-    if (Number.isNaN(time.getTime())) return setError("Pick a date and time.");
-    if (time.getTime() > Date.now() + 60_000) return setError("The date and time can't be in the future.");
+    const time = draft.when === localInputValue(openedAt) ? new Date() : checked.time;
     setSaving(true);
     setError(null);
     try {
       const txn = await addTransaction({
-        type,
-        amount: value,
-        merchant: name,
-        category: category || null,
+        type: draft.type,
+        amount: checked.amount,
+        merchant: checked.merchant,
+        category: draft.category || null,
         transaction_time: time.toISOString(),
-        paid_with: paidWith,
+        paid_with: draft.paidWith,
       });
       onAdded(txn);
       onClose();
@@ -148,93 +131,15 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
           noValidate
           className="min-h-0 flex-1 overflow-y-auto px-5 pt-2 pb-[max(env(safe-area-inset-bottom),1.25rem)] sm:pb-6"
         >
-          <Segmented
-            label="Type"
-            value={type}
-            onChange={setType}
-            options={[
-              { value: "DEBIT", label: "Expense" },
-              { value: "CREDIT", label: "Income" },
-            ]}
+          <TransactionFields
+            idPrefix="add"
+            draft={draft}
+            onChange={change}
+            amountRef={amountRef}
+            maxWhen={localInputValue(openedAt + 5 * 60_000)}
+            autoCategory
+            showPaidWith
           />
-
-          <label className="mt-4 flex items-center gap-2 rounded-2xl border border-line bg-surface px-4 focus-within:border-violet/50 focus-within:ring-4 focus-within:ring-violet/15">
-            <span className="text-2xl font-semibold text-ink-3" aria-hidden>
-              ₹
-            </span>
-            <input
-              ref={amountRef}
-              inputMode="decimal"
-              autoComplete="off"
-              enterKeyHint="next"
-              placeholder="0"
-              aria-label="Amount in rupees"
-              value={amount}
-              onChange={(e) => edit(setAmount)(e.target.value)}
-              className="h-16 w-full min-w-0 bg-transparent text-[32px] font-bold tracking-tight text-ink tabular-nums outline-none placeholder:text-ink-3"
-            />
-          </label>
-
-          <Field id="add-merchant" label={debit ? "Paid to" : "Received from"}>
-            <input
-              id="add-merchant"
-              autoComplete="off"
-              autoCapitalize="words"
-              enterKeyHint="done"
-              maxLength={100}
-              placeholder={debit ? "e.g. Chai Point, auto rickshaw" : "e.g. Freelance project, Priya"}
-              value={merchant}
-              onChange={(e) => edit(setMerchant)(e.target.value)}
-              className={FIELD}
-            />
-          </Field>
-
-          <Field id="add-category" label="Category">
-            <div className="relative">
-              <select
-                id="add-category"
-                value={category}
-                onChange={(e) => setCategory(e.target.value)}
-                className={`${FIELD} appearance-none truncate pr-9`}
-              >
-                <option value={AUTO}>Auto (from the name)</option>
-                {CATEGORY_NAMES.map((name) => (
-                  <option key={name} value={name}>
-                    {name}
-                  </option>
-                ))}
-              </select>
-              <ChevronDown size={16} className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ink-2" aria-hidden />
-            </div>
-          </Field>
-          <Field id="add-when" label="Date & time">
-            <input
-              id="add-when"
-              type="datetime-local"
-              value={when}
-              max={localInputValue(openedAt + 5 * 60_000)}
-              onChange={(e) => edit(setWhen)(e.target.value)}
-              className={`${FIELD} appearance-none [&::-webkit-date-and-time-value]:text-left`}
-            />
-          </Field>
-
-          <div className="mt-4">
-            <p className="mb-1.5 text-[13px] font-medium text-ink-2">{debit ? "Paid from" : "Received in"}</p>
-            <Segmented
-              label={debit ? "Paid from" : "Received in"}
-              value={paidWith}
-              onChange={setPaidWith}
-              options={[
-                { value: "bank", label: "Bank account" },
-                { value: "cash", label: "Cash" },
-              ]}
-            />
-            <p className="mt-2 text-[13px] text-ink-2">
-              {paidWith === "cash"
-                ? "Counts in your spending and limits, but not in Balance left: cash never goes through the bank."
-                : "Moves your Balance left, just like a bank SMS."}
-            </p>
-          </div>
 
           {error ? (
             <p role="alert" className="mt-3 text-[13px] font-medium text-expense">
@@ -247,21 +152,10 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
             disabled={saving}
             className="mt-5 h-12 w-full rounded-full bg-ink text-[16px] font-semibold text-canvas transition active:scale-[0.99] disabled:opacity-60"
           >
-            {saving ? "Adding…" : debit ? "Add expense" : "Add income"}
+            {saving ? "Adding…" : draft.type === "DEBIT" ? "Add expense" : "Add income"}
           </button>
         </form>
       </div>
-    </div>
-  );
-}
-
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
-  return (
-    <div className="mt-4">
-      <label htmlFor={id} className="mb-1.5 block text-[13px] font-medium text-ink-2">
-        {label}
-      </label>
-      {children}
     </div>
   );
 }

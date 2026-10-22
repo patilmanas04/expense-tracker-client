@@ -1,9 +1,10 @@
 "use client";
 
-import { Check, Landmark, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
+import { Check, ChevronDown, Landmark, LogOut, Mail, RefreshCw, Share, SquarePlus, Wallet } from "lucide-react";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
 import { sendTestEmail } from "@/lib/api";
+import { ALL_SPENDING, LIMIT_CATEGORIES } from "@/lib/categories";
 import {
   dateTimeLabel,
   formatMoney,
@@ -13,12 +14,12 @@ import {
   shortDayLabel,
   toMinor,
 } from "@/lib/format";
-import type { PeriodLimit } from "@/lib/types";
+import type { LimitsInput, LimitsSummary, PeriodLimit } from "@/lib/types";
 
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
 import { useTheme, type Theme } from "../theme";
-import { Amount, Avatar, Card, ProgressBar, Segmented, SelectPill } from "../ui";
+import { Amount, Avatar, Card, CategoryTile, IconTile, ProgressBar, Segmented, SelectPill } from "../ui";
 
 export function SettingsView() {
   const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut } = useData();
@@ -257,12 +258,21 @@ function BalanceSection() {
 
 const limitText = (value: number | null) => (value === null ? "" : String(value));
 
-/** Weekly/monthly spend limits; reaching one sends an email (Gmail OAuth on the server). */
+/** The limits currently saved for "All spending" or one category. */
+function limitsFor(summary: LimitsSummary | null, target: string) {
+  if (!summary) return { weekly: null, monthly: null };
+  if (target === ALL_SPENDING) return { weekly: summary.weekly.limit, monthly: summary.monthly.limit };
+  const rule = summary.categories.find((c) => c.category === target);
+  return { weekly: rule?.weekly.limit ?? null, monthly: rule?.monthly.limit ?? null };
+}
+
+/** Weekly/monthly limits, overall and per category; reaching one notifies you (and emails, if set up). */
 function LimitsSection() {
   // Loaded with the rest of the app (and refreshed as SMS arrive), so it's ready on arrival.
   const { limits: summary, saveLimits } = useData();
-  const [weekly, setWeekly] = useState(() => limitText(summary?.weekly.limit ?? null));
-  const [monthly, setMonthly] = useState(() => limitText(summary?.monthly.limit ?? null));
+  const [target, setTarget] = useState(ALL_SPENDING); // which limit the form edits
+  const [weekly, setWeekly] = useState(() => limitText(limitsFor(summary, ALL_SPENDING).weekly));
+  const [monthly, setMonthly] = useState(() => limitText(limitsFor(summary, ALL_SPENDING).monthly));
   const [dirty, setDirty] = useState(false);
   const [shown, setShown] = useState(summary);
   const [saving, setSaving] = useState(false);
@@ -271,14 +281,32 @@ function LimitsSection() {
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{ ok: boolean; text: string } | null>(null);
 
+  const fill = (from: LimitsSummary | null, which: string) => {
+    const current = limitsFor(from, which);
+    setWeekly(limitText(current.weekly));
+    setMonthly(limitText(current.monthly));
+  };
+
   // Fill the form when the limits arrive or change, unless you're in the middle of editing it.
   if (summary !== shown) {
     setShown(summary);
-    if (summary && !dirty) {
-      setWeekly(limitText(summary.weekly.limit));
-      setMonthly(limitText(summary.monthly.limit));
-    }
+    if (summary && !dirty) fill(summary, target);
   }
+
+  // Switching what the form edits shows that limit's saved amounts.
+  const choose = (which: string) => {
+    setTarget(which);
+    setDirty(false);
+    setSaved(false);
+    setFormError(null);
+    fill(summary, which);
+  };
+
+  // "Edit" on a limit: load it into the form below and put the cursor there.
+  const editLimit = (which: string) => {
+    choose(which);
+    document.getElementById("weekly-limit")?.focus();
+  };
 
   const edit = (setter: (value: string) => void) => (value: string) => {
     setDirty(true);
@@ -294,9 +322,13 @@ function LimitsSection() {
       if (amount === null || Number(amount) <= 0) throw new Error(`${label} must be a positive amount, like 5000 or 5000.50.`);
       return amount;
     };
-    let body: { weekly_limit: string | null; monthly_limit: string | null };
+    let body: LimitsInput;
     try {
-      body = { weekly_limit: read(weekly, "Weekly limit"), monthly_limit: read(monthly, "Monthly limit") };
+      body = {
+        category: target === ALL_SPENDING ? null : target,
+        weekly_limit: read(weekly, "Weekly limit"),
+        monthly_limit: read(monthly, "Monthly limit"),
+      };
     } catch (err) {
       setFormError((err as Error).message);
       return;
@@ -306,8 +338,7 @@ function LimitsSection() {
     try {
       const next = await saveLimits(body);
       setDirty(false);
-      setWeekly(limitText(next.weekly.limit));
-      setMonthly(limitText(next.monthly.limit));
+      fill(next, target);
       setSaved(true);
     } catch (err) {
       setFormError(err instanceof Error ? err.message : "Couldn't save your limits.");
@@ -330,27 +361,56 @@ function LimitsSection() {
   };
 
   const email = summary?.email;
+  const withLimits = new Set(summary?.categories.map((c) => c.category));
   return (
     <section id="limits" className="mt-6 scroll-mt-6">
       <h2 className="mb-2 px-1 text-[15px] text-ink-2">Spending limits</h2>
       <Card className="divide-y divide-line overflow-hidden">
         {summary ? (
-          <div className="space-y-5 p-4">
+          <LimitGroup name="All spending" tile={<IconTile icon={Wallet} color="#8458F5" size="sm" />} onEdit={() => editLimit(ALL_SPENDING)}>
             <LimitMeter title="This week" period={summary.weekly} currency={summary.currency} />
             <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} />
-          </div>
+          </LimitGroup>
         ) : (
           <div className="h-32 animate-pulse bg-canvas/60" aria-label="Loading limits" />
         )}
 
+        {summary?.categories.map((c) => (
+          <LimitGroup key={c.category} name={c.category} tile={<CategoryTile name={c.category} size="sm" />} onEdit={() => editLimit(c.category)}>
+            {c.weekly.limit !== null ? <LimitMeter title="This week" period={c.weekly} currency={summary.currency} /> : null}
+            {c.monthly.limit !== null ? <LimitMeter title="This month" period={c.monthly} currency={summary.currency} /> : null}
+          </LimitGroup>
+        ))}
+
         <form onSubmit={submit} className="p-4" noValidate>
+          <label htmlFor="limit-target" className="text-[13px] font-medium text-ink-2">
+            Limit for
+          </label>
+          <div className="relative mt-1.5 mb-3">
+            <select
+              id="limit-target"
+              value={target}
+              onChange={(e) => choose(e.target.value)}
+              className="h-12 w-full appearance-none truncate rounded-2xl border border-line bg-canvas pr-10 pl-4 text-[16px] font-medium text-ink outline-none focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
+            >
+              <option value={ALL_SPENDING}>All spending</option>
+              {LIMIT_CATEGORIES.map((name) => (
+                <option key={name} value={name}>
+                  {withLimits.has(name) ? `${name} · has a limit` : name}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={16} className="pointer-events-none absolute top-1/2 right-4 -translate-y-1/2 text-ink-2" aria-hidden />
+          </div>
           <div className="grid grid-cols-2 gap-3">
             <LimitField id="weekly-limit" label="Weekly limit" value={weekly} onChange={edit(setWeekly)} />
             <LimitField id="monthly-limit" label="Monthly limit" value={monthly} onChange={edit(setMonthly)} />
           </div>
           <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
-            Leave empty for no limit. When spending reaches a limit you get one notification under the bell on Home, once per week
-            (Mon–Sun) or month.
+            {target === ALL_SPENDING
+              ? "Counts everything you spend. Leave empty for no limit."
+              : `Counts only ${target}. Leave both empty to remove this limit.`}{" "}
+            When spending reaches a limit you get one notification under the bell on Home, once per week (Mon–Sun) or month.
           </p>
           {formError ? (
             <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
@@ -407,6 +467,27 @@ function LimitsSection() {
         </div>
       </Card>
     </section>
+  );
+}
+
+/** One limit's meters under its name, with an Edit shortcut to the form. */
+function LimitGroup({ name, tile, onEdit, children }: { name: string; tile: ReactNode; onEdit: () => void; children: ReactNode }) {
+  return (
+    <div role="group" aria-label={`${name} limit`} className="p-4">
+      <div className="flex items-center gap-3">
+        {tile}
+        <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{name}</p>
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label={`Edit ${name} limit`}
+          className="h-8 shrink-0 rounded-full px-3 text-[13px] font-medium text-violet-strong hover:bg-violet-soft"
+        >
+          Edit
+        </button>
+      </div>
+      <div className="mt-3 space-y-4">{children}</div>
+    </div>
   );
 }
 

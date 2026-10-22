@@ -17,6 +17,8 @@ export interface Transaction {
   parsed_by: string;
   transaction_time: string;
   created_at: string;
+  /** Moves on every change (an edit, a category filled in later); the polling cursor. */
+  updated_at: string;
 }
 
 /** Mirrors `ManualTransactionInput` in the backend's main.py. */
@@ -32,6 +34,17 @@ export interface NewTransaction {
   /** Cash never changes the bank balance. */
   paid_with: "bank" | "cash";
 }
+
+/** Mirrors `TransactionEdit` in the backend's main.py: only the fields sent change. */
+export type TransactionPatch = Partial<{
+  type: TxType;
+  amount: string;
+  merchant: string;
+  category: string;
+  transaction_time: string;
+  /** Only for transactions added by hand. */
+  paid_with: "bank" | "cash";
+}>;
 
 /** Mirrors `BalanceSummary` in the backend's balance.py. */
 export interface Balance {
@@ -54,15 +67,33 @@ export interface PeriodLimit {
   /** "YYYY-MM-DD", first and last day (IST). */
   start: string;
   end: string;
-  /** Alert email already sent for this period and limit. */
+  /** Notification already sent for this period and limit. */
   alerted: boolean;
+}
+
+/** A category with a spending limit of its own. */
+export interface CategoryLimitStatus {
+  category: string;
+  weekly: PeriodLimit;
+  monthly: PeriodLimit;
 }
 
 export interface LimitsSummary {
   currency: string;
+  /** Overall ("All spending"). */
   weekly: PeriodLimit;
   monthly: PeriodLimit;
+  /** Only categories that have a limit, in category order. */
+  categories: CategoryLimitStatus[];
   email: { configured: boolean; to: string | null; last_error: string | null };
+}
+
+/** Body of `PUT /api/v1/limits`: decimal strings, or null for "no limit". */
+export interface LimitsInput {
+  /** A category; null for overall spending. Both limits null removes a category's limit. */
+  category: string | null;
+  weekly_limit: string | null;
+  monthly_limit: string | null;
 }
 
 /** Mirrors `NotificationOut` / `Inbox` in the backend's notifications.py. */

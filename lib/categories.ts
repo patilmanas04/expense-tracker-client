@@ -68,6 +68,12 @@ const META: Record<string, CategoryMeta> = {
 /** Every category, in the same order as the backend's list. */
 export const CATEGORY_NAMES = Object.keys(META);
 
+/** The overall spending limit, across every category (`ALL` in the backend's limits.py). */
+export const ALL_SPENDING = "All";
+
+/** Categories that can have a spending limit; money-in categories can't (matches limits.py). */
+export const LIMIT_CATEGORIES = CATEGORY_NAMES.filter((name) => name !== "Salary & Income" && name !== "Refunds & Cashback");
+
 /** `account_ref` of a transaction added by hand and paid in cash (matches balance.py). */
 export const CASH_ACCOUNT = "Cash";
 

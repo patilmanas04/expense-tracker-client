@@ -5,7 +5,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import {
   availableMonths,
   currencies as listCurrencies,
-  latestCreatedAt,
+  latestUpdatedAt,
   mergeTransactions,
   preferredCurrency,
   prepare,
@@ -26,9 +26,10 @@ import {
   saveBalance as apiSaveBalance,
   saveLimits as apiSaveLimits,
   signOut as apiSignOut,
+  updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
 import { dayKey, monthOf } from "@/lib/format";
-import type { Balance, Inbox, LimitsSummary, NewTransaction, User } from "@/lib/types";
+import type { Balance, Inbox, LimitsInput, LimitsSummary, NewTransaction, TransactionPatch, User } from "@/lib/types";
 
 /** "expired": the backend rejected the session cookie; "signed-out": you signed out. */
 export type Status = "loading" | "signed-out" | "expired" | "ready" | "error";
@@ -63,9 +64,9 @@ interface DataContextValue {
   balance: Balance | null;
   saveBalance: (amount: string) => Promise<void>;
   clearBalance: () => Promise<void>;
-  /** Weekly/monthly spend limits with what's been spent; null until loaded. */
+  /** Weekly/monthly spend limits, overall and per category, with what's been spent; null until loaded. */
   limits: LimitsSummary | null;
-  saveLimits: (limits: { weekly_limit: string | null; monthly_limit: string | null }) => Promise<LimitsSummary>;
+  saveLimits: (limits: LimitsInput) => Promise<LimitsSummary>;
   /** In-app notifications (bell on Home). */
   inbox: Inbox;
   notificationsOpen: boolean;
@@ -76,6 +77,8 @@ interface DataContextValue {
   markNotificationsRead: (ids?: string[]) => Promise<void>;
   /** Adds a transaction by hand; it appears in the lists straight away. */
   addTransaction: (input: NewTransaction) => Promise<Txn>;
+  /** Edits a transaction; a new category is remembered for the merchant. */
+  updateTransaction: (id: string, patch: TransactionPatch) => Promise<Txn>;
   /** Deletes a transaction added by hand. */
   deleteTransaction: (id: string) => Promise<void>;
   selected: Txn | null;
@@ -92,7 +95,7 @@ const STALE_AFTER_MS = 60_000;
 export const POLL_INTERVAL_MS = 5_000;
 /**
  * Re-check this far behind the newest row: two SMS arriving together can commit slightly
- * out of order (the server stamps created_at just before insert). Duplicates are dropped by id.
+ * out of order (the server stamps the time just before insert). Duplicates are dropped by id.
  */
 const POLL_OVERLAP_MS = 15_000;
 /** Consecutive failed polls before the "Couldn't refresh" banner appears. */
@@ -142,7 +145,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
   const lastSyncedRef = useRef(0);
-  const cursorRef = useRef(EPOCH); // newest created_at already loaded
+  const cursorRef = useRef(EPOCH); // newest updated_at already loaded
   const pollFailures = useRef(0);
   const limitsTxns = useRef<Txn[] | null>(null); // transactions the limits were last loaded for
   const deletedIds = useRef(new Set<string>()); // so a poll already in flight can't bring one back
@@ -160,7 +163,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setError(null);
       setStatus("ready");
       lastSyncedRef.current = Date.now();
-      cursorRef.current = latestCreatedAt(result.txns) ?? EPOCH;
+      cursorRef.current = latestUpdatedAt(result.txns) ?? EPOCH;
       pollFailures.current = 0;
     } else if (result.kind === "signed-out") {
       setUser(null);
@@ -231,7 +234,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [load]);
 
-  /** Cheap 5-second check: only rows recorded since the newest one we have, plus the balance. */
+  /** Cheap 5-second check: only rows added or changed since the newest change we have, plus the balance. */
   const poll = useCallback(async () => {
     if (inFlight.current) return;
     inFlight.current = true;
@@ -245,7 +248,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const kept = fresh.filter((t) => !deletedIds.current.has(t.id));
       if (kept.length) {
         setTxns((current) => mergeTransactions(current, kept));
-        const newest = latestCreatedAt(prepare(fresh));
+        const newest = latestUpdatedAt(prepare(fresh));
         if (newest && Date.parse(newest) > Date.parse(cursorRef.current)) cursorRef.current = newest;
       }
       if (nextBalance !== undefined) setBalance((current) => (same(current, nextBalance) ? current : nextBalance));
@@ -299,7 +302,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setBalance(null);
   }, []);
 
-  const saveLimits = useCallback(async (body: { weekly_limit: string | null; monthly_limit: string | null }) => {
+  const saveLimits = useCallback(async (body: LimitsInput) => {
     const next = await apiSaveLimits(body);
     setLimits(next);
     return next;
@@ -316,8 +319,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
       const created = await apiAddTransaction(input);
       const [txn] = prepare([created]); // normalises the timestamps, as for polled rows
       setTxns((current) => mergeTransactions(current, [created]));
-      if (Date.parse(txn.created_at) > Date.parse(cursorRef.current)) cursorRef.current = txn.created_at;
+      if (Date.parse(txn.updated_at) > Date.parse(cursorRef.current)) cursorRef.current = txn.updated_at;
       void reloadBalance();
+      return txn;
+    },
+    [reloadBalance],
+  );
+
+  const updateTransaction = useCallback(
+    async (id: string, patch: TransactionPatch) => {
+      const updated = await apiUpdateTransaction(id, patch);
+      const [txn] = prepare([updated]);
+      setTxns((current) => mergeTransactions(current, [updated]));
+      if (Date.parse(txn.updated_at) > Date.parse(cursorRef.current)) cursorRef.current = txn.updated_at;
+      void reloadBalance(); // amount, type or date may have moved it
       return txn;
     },
     [reloadBalance],
@@ -348,6 +363,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Stable, so an open sheet's effects don't re-run (and move focus) whenever other data changes.
+  const openNotifications = useCallback(() => setNotificationsOpenedAt(Date.now()), []);
+  const closeNotifications = useCallback(() => setNotificationsOpenedAt(0), []);
+  const closeTransaction = useCallback(() => setSelectedId(null), []);
+
   const value = useMemo<DataContextValue>(
     () => ({
       status,
@@ -372,14 +392,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       inbox,
       notificationsOpen: notificationsOpenedAt > 0,
       notificationsOpenedAt,
-      openNotifications: () => setNotificationsOpenedAt(Date.now()),
-      closeNotifications: () => setNotificationsOpenedAt(0),
+      openNotifications,
+      closeNotifications,
       markNotificationsRead,
       addTransaction,
+      updateTransaction,
       deleteTransaction,
       selected: (selectedId && txns.find((t) => t.id === selectedId)) || null,
       openTransaction: setSelectedId,
-      closeTransaction: () => setSelectedId(null),
+      closeTransaction,
       activityRequest,
       requestActivity: (request) => setActivityRequest({ ...request, nonce: Date.now() }),
     }),
@@ -401,8 +422,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       saveLimits,
       inbox,
       notificationsOpenedAt,
+      openNotifications,
+      closeNotifications,
+      closeTransaction,
       markNotificationsRead,
       addTransaction,
+      updateTransaction,
       deleteTransaction,
       selectedId,
       activityRequest,
