@@ -16,7 +16,10 @@ import { Amount, CategoryTile, cx } from "./ui";
 
 /** iOS navigation-bar capsule: "Edit", "Cancel", "Done". */
 const CAPSULE =
-  "absolute top-[18px] h-9 rounded-full px-4 text-[15px] font-semibold transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-60";
+  "h-9 rounded-full px-4 text-[15px] font-semibold transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-60";
+/** Round glass button in the bar: close and delete. Each adds its own position (the glass rim needs one). */
+const ROUND =
+  "glass grid size-9 place-items-center rounded-full transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet";
 
 export function TransactionSheet() {
   const { selected } = useData();
@@ -37,7 +40,7 @@ function draftOf(t: Txn): Draft {
 }
 
 function SheetBody({ t }: { t: Txn }) {
-  const { closeTransaction, updateTransaction } = useData();
+  const { closeTransaction, updateTransaction, deleteTransaction } = useData();
   const dialogRef = useRef<HTMLDivElement>(null);
   const { backdropRef, grabProps } = useSheetDrag(dialogRef, closeTransaction);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -170,27 +173,33 @@ function SheetBody({ t }: { t: Txn }) {
           <span className="absolute top-2 left-1/2 h-1.5 w-10 -translate-x-1/2 rounded-full bg-ink/15 sm:hidden" aria-hidden />
           {editing ? (
             <>
-              <button type="button" onClick={cancelEditing} disabled={saving} className={cx(CAPSULE, "glass left-4 text-ink")}>
+              <button type="button" onClick={cancelEditing} disabled={saving} className={cx(CAPSULE, "glass absolute top-[18px] left-4 text-ink")}>
                 Cancel
               </button>
               <h2 id="edit-title" className="pointer-events-none absolute top-[18px] left-1/2 flex h-9 -translate-x-1/2 items-center text-[15px] font-semibold whitespace-nowrap text-ink">
                 Edit transaction
               </h2>
-              <button type="button" onClick={save} disabled={saving} className={cx(CAPSULE, "glass-tint right-4")}>
+              <button type="button" onClick={save} disabled={saving} className={cx(CAPSULE, "glass-tint absolute top-[18px] right-4")}>
                 {saving ? "Saving…" : "Done"}
               </button>
             </>
           ) : (
             <>
-              <button ref={editRef} type="button" onClick={startEditing} className={cx(CAPSULE, "glass left-4 text-ink")}>
-                Edit
-              </button>
+              <div className="absolute top-[18px] left-4 flex items-center gap-2">
+                <button ref={editRef} type="button" onClick={startEditing} className={cx(CAPSULE, "glass relative text-ink")}>
+                  Edit
+                </button>
+                {/* Deletes at once, with Undo for a few seconds (bar above the tabs). */}
+                <button type="button" onClick={() => deleteTransaction(t.id)} aria-label="Delete transaction" title="Delete" className={cx(ROUND, "relative text-expense")}>
+                  <Trash2 size={17} />
+                </button>
+              </div>
               <button
                 ref={closeRef}
                 type="button"
                 onClick={closeTransaction}
                 aria-label="Close details"
-                className="glass absolute top-[18px] right-4 grid size-9 place-items-center rounded-full text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet"
+                className={cx(ROUND, "absolute top-[18px] right-4 text-ink")}
               >
                 <X size={18} />
               </button>
@@ -260,7 +269,7 @@ function SheetBody({ t }: { t: Txn }) {
               <Row label={manual ? "Added by" : "Read by"}>{parsedByLabel(t)}</Row>
             </dl>
 
-            {manual ? <DeleteManual id={t.id} /> : <OriginalSms text={t.raw_message} />}
+            {manual ? null : <OriginalSms text={t.raw_message} />}
           </div>
         )}
       </div>
@@ -275,67 +284,6 @@ function OriginalSms({ text }: { text: string }) {
         <MessageSquareText size={16} aria-hidden /> Original SMS
       </p>
       <p className="text-[14px] leading-relaxed break-words whitespace-pre-wrap text-ink">{text}</p>
-    </div>
-  );
-}
-
-/** Transactions added by hand can be deleted (bank SMS can't): a second tap confirms. */
-function DeleteManual({ id }: { id: string }) {
-  const { deleteTransaction } = useData();
-  const [confirming, setConfirming] = useState(false);
-  const [deleting, setDeleting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const remove = async () => {
-    setDeleting(true);
-    setError(null);
-    try {
-      await deleteTransaction(id); // closes this sheet
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't delete it.");
-      setDeleting(false);
-    }
-  };
-
-  return (
-    <div className="mt-4">
-      {confirming ? (
-        <div className="rounded-card border border-expense/30 bg-surface p-4 shadow-card">
-          <p className="text-sm font-medium text-ink">Delete this transaction?</p>
-          <p className="mt-0.5 text-[13px] text-ink-2">It comes off your totals, limits and balance. This can&apos;t be undone.</p>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={remove}
-              disabled={deleting}
-              className="h-10 flex-1 rounded-full bg-expense text-sm font-semibold text-canvas disabled:opacity-60"
-            >
-              {deleting ? "Deleting…" : "Delete"}
-            </button>
-            <button
-              type="button"
-              onClick={() => setConfirming(false)}
-              disabled={deleting}
-              className="h-10 flex-1 rounded-full border border-line bg-surface text-sm font-medium text-ink"
-            >
-              Cancel
-            </button>
-          </div>
-        </div>
-      ) : (
-        <button
-          type="button"
-          onClick={() => setConfirming(true)}
-          className="flex h-11 w-full items-center justify-center gap-2 rounded-full border border-expense/30 bg-surface text-[15px] font-medium text-expense"
-        >
-          <Trash2 size={17} aria-hidden /> Delete transaction
-        </button>
-      )}
-      {error ? (
-        <p role="alert" className="mt-2 text-center text-[13px] font-medium text-expense">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }

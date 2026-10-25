@@ -18,6 +18,7 @@ import type { LimitsInput, LimitsSummary, PeriodLimit } from "@/lib/types";
 
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
+import { SwipeToDelete } from "../swipe-to-delete";
 import { useTheme, type Theme } from "../theme";
 import { Amount, Avatar, Card, CategoryTile, IconTile, ProgressBar, Segmented, SelectPill } from "../ui";
 
@@ -308,6 +309,17 @@ function LimitsSection() {
     document.getElementById("weekly-limit")?.focus();
   };
 
+  // Swipe left on a limit: a category's goes away; "All spending" keeps its meters, without limits.
+  const deleteLimit = async (which: string) => {
+    setFormError(null);
+    try {
+      await saveLimits({ category: which === ALL_SPENDING ? null : which, weekly_limit: null, monthly_limit: null });
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Couldn't delete that limit.");
+      throw err; // the row comes back
+    }
+  };
+
   const edit = (setter: (value: string) => void) => (value: string) => {
     setDirty(true);
     setSaved(false);
@@ -367,7 +379,13 @@ function LimitsSection() {
       <h2 className="mb-2 px-1 text-[15px] text-ink-2">Spending limits</h2>
       <Card className="divide-y divide-line overflow-hidden">
         {summary ? (
-          <LimitGroup name="All spending" tile={<IconTile icon={Wallet} color="#8458F5" size="sm" />} onEdit={() => editLimit(ALL_SPENDING)}>
+          <LimitGroup
+            name="All spending"
+            tile={<IconTile icon={Wallet} color="#8458F5" size="sm" />}
+            onEdit={() => editLimit(ALL_SPENDING)}
+            onDelete={summary.weekly.limit !== null || summary.monthly.limit !== null ? () => deleteLimit(ALL_SPENDING) : undefined}
+            stays
+          >
             <LimitMeter title="This week" period={summary.weekly} currency={summary.currency} />
             <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} />
           </LimitGroup>
@@ -376,7 +394,13 @@ function LimitsSection() {
         )}
 
         {summary?.categories.map((c) => (
-          <LimitGroup key={c.category} name={c.category} tile={<CategoryTile name={c.category} size="sm" />} onEdit={() => editLimit(c.category)}>
+          <LimitGroup
+            key={c.category}
+            name={c.category}
+            tile={<CategoryTile name={c.category} size="sm" />}
+            onEdit={() => editLimit(c.category)}
+            onDelete={() => deleteLimit(c.category)}
+          >
             {c.weekly.limit !== null ? <LimitMeter title="This week" period={c.weekly} currency={summary.currency} /> : null}
             {c.monthly.limit !== null ? <LimitMeter title="This month" period={c.monthly} currency={summary.currency} /> : null}
           </LimitGroup>
@@ -470,24 +494,43 @@ function LimitsSection() {
   );
 }
 
-/** One limit's meters under its name, with an Edit shortcut to the form. */
-function LimitGroup({ name, tile, onEdit, children }: { name: string; tile: ReactNode; onEdit: () => void; children: ReactNode }) {
+/**
+ * One limit's meters under its name, with an Edit shortcut to the form. Swipe left to delete it
+ * (when `onDelete` is given); `stays` keeps the block afterwards (the "All spending" meters).
+ */
+function LimitGroup({
+  name,
+  tile,
+  onEdit,
+  onDelete,
+  stays = false,
+  children,
+}: {
+  name: string;
+  tile: ReactNode;
+  onEdit: () => void;
+  onDelete?: () => Promise<void>;
+  stays?: boolean;
+  children: ReactNode;
+}) {
   return (
-    <div role="group" aria-label={`${name} limit`} className="p-4">
-      <div className="flex items-center gap-3">
-        {tile}
-        <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{name}</p>
-        <button
-          type="button"
-          onClick={onEdit}
-          aria-label={`Edit ${name} limit`}
-          className="h-8 shrink-0 rounded-full px-3 text-[13px] font-medium text-violet-strong hover:bg-violet-soft"
-        >
-          Edit
-        </button>
+    <SwipeToDelete id={`limit:${name}`} onDelete={onDelete ?? (() => {})} disabled={!onDelete} removes={!stays} contentClassName="bg-surface">
+      <div role="group" aria-label={`${name} limit`} className="p-4">
+        <div className="flex items-center gap-3">
+          {tile}
+          <p className="min-w-0 flex-1 truncate text-[15px] font-semibold text-ink">{name}</p>
+          <button
+            type="button"
+            onClick={onEdit}
+            aria-label={`Edit ${name} limit`}
+            className="h-8 shrink-0 rounded-full px-3 text-[13px] font-medium text-violet-strong hover:bg-violet-soft"
+          >
+            Edit
+          </button>
+        </div>
+        <div className="mt-3 space-y-4">{children}</div>
       </div>
-      <div className="mt-3 space-y-4">{children}</div>
-    </div>
+    </SwipeToDelete>
   );
 }
 

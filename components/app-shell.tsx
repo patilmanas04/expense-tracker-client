@@ -9,6 +9,7 @@ import { useData } from "./data-provider";
 import { BottomNav, Sidebar } from "./nav";
 import { NotificationDrawer } from "./notification-drawer";
 import { TransactionSheet } from "./transaction-sheet";
+import { UndoToast } from "./undo-toast";
 
 /** Pages render through this gate so the route itself is always part of the static shell. */
 export function Ready({ children }: { children: ReactNode }) {
@@ -68,6 +69,7 @@ export function AppShell({ children }: { children: ReactNode }) {
       <BottomNav />
       <TransactionSheet />
       <NotificationDrawer />
+      <UndoToast />
     </div>
   );
 }

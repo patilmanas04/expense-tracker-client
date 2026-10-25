@@ -59,6 +59,12 @@ export const getLimits = () => request<LimitsSummary>("/api/v1/limits");
 
 export const getNotifications = () => request<Inbox>("/api/v1/notifications?limit=30");
 
+/** Swipe to delete: hides one notification (the alert still counts as sent, so it isn't repeated). */
+export const dismissNotification = (id: string) => request<void>(`/api/v1/notifications/${id}`, { method: "DELETE" });
+
+/** Clear: hides every notification. */
+export const clearNotifications = () => request<void>("/api/v1/notifications", { method: "DELETE" });
+
 /** Marks the given notifications read, or all of them when `ids` is omitted. */
 export const markNotificationsRead = (ids?: string[]) =>
   request<{ unread: number }>("/api/v1/notifications/read", {
@@ -91,8 +97,9 @@ export const updateTransaction = (id: string, patch: TransactionPatch) =>
     body: JSON.stringify(patch),
   });
 
-/** Only works for transactions added by hand; bank SMS can't be deleted. */
-export const deleteTransaction = (id: string) => request<void>(`/api/v1/transactions/${id}`, { method: "DELETE" });
+/** Deletes for good. `keepalive` lets it finish while the page is closing. */
+export const deleteTransaction = (id: string, keepalive = false) =>
+  request<void>(`/api/v1/transactions/${id}`, { method: "DELETE", keepalive });
 
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 

@@ -15,6 +15,8 @@
   --color-warn: #9a6700;
   --color-warn-soft: #fff6db;
   --color-coral-ink: #a3361d;
+  /* Destructive actions (swipe to delete): the same red in both themes, white text at 5.2:1 */
+  --color-danger: #d4213d;
   /* Glowing call-to-action pills (Home insight, Google sign-in) */
   --color-insight: #111113;
   --color-on-insight: #f4f4f5;
@@ -135,6 +137,19 @@ body {
 }
 .no-scrollbar::-webkit-scrollbar {
   display: none;
+}
+
+/* Phone and tablet layout (below the sidebar breakpoint): everything still scrolls, but no scroll
+   bar shows, like a native app. `scrollbar-width` covers Chrome, Firefox and Safari 18.2+ (iOS too);
+   the -webkit- rule covers older WebKit. The desktop layout keeps its scroll bars. */
+@media (width < 64rem) {
+  html,
+  * {
+    scrollbar-width: none;
+  }
+  ::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 .pb-nav {

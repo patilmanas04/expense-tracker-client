@@ -7,7 +7,8 @@ import { CASH_ACCOUNT, categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/c
 import { dayHeading, formatMoney, timeLabel } from "@/lib/format";
 
 import { useData } from "./data-provider";
-import { Card, CategoryTile, IconTile, cx } from "./ui";
+import { SwipeToDelete } from "./swipe-to-delete";
+import { CategoryTile, IconTile, cx } from "./ui";
 
 export function transactionTitle(t: Txn) {
   if (!t.is_parsed) return "Unrecognised SMS";
@@ -17,12 +18,18 @@ export function transactionTitle(t: Txn) {
 /** "HDFC XX4821" -> "HDFC ••4821", compact enough for a phone row. */
 const shortAccount = (ref: string) => ref.replace(/\b[xX*]{2,}(?=\d)/, "••");
 
+/** A transaction in a list: tap for details, swipe left to delete (with Undo). */
 export function TransactionRow({ t }: { t: Txn }) {
-  const { openTransaction } = useData();
+  const { openTransaction, deleteTransaction } = useData();
   const category = categoryName(t);
   const debit = t.type === "DEBIT";
   return (
-    <Card className="transition hover:border-line hover:shadow-float">
+    <SwipeToDelete
+      id={`txn:${t.id}`}
+      onDelete={() => deleteTransaction(t.id)}
+      className="rounded-card shadow-card transition hover:shadow-float"
+      contentClassName="rounded-card border border-line/70 bg-surface transition hover:border-line"
+    >
       <button
         type="button"
         onClick={() => openTransaction(t.id)}
@@ -69,7 +76,7 @@ export function TransactionRow({ t }: { t: Txn }) {
           ) : null}
         </span>
       </button>
-    </Card>
+    </SwipeToDelete>
   );
 }
 

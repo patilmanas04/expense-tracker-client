@@ -9,6 +9,7 @@ import type { AppNotification } from "@/lib/types";
 
 import { useData } from "./data-provider";
 import { useSheetDrag } from "./sheet-drag";
+import { SwipeToDelete } from "./swipe-to-delete";
 import { IconTile, cx } from "./ui";
 
 const LIMITS_PATH = "/settings#limits";
@@ -22,6 +23,8 @@ export function NotificationDrawer() {
     notificationsOpenedAt,
     closeNotifications,
     markNotificationsRead,
+    dismissNotification,
+    clearNotifications,
     requestActivity,
   } = useData();
   const router = useRouter();
@@ -86,18 +89,17 @@ export function NotificationDrawer() {
         {/* Grabber and title: swipe down here to close (phones). */}
         <div {...grabProps} className="flex shrink-0 touch-none flex-col select-none">
           <span className="mx-auto mt-3 h-1.5 w-10 shrink-0 rounded-full bg-ink/15 sm:hidden" aria-hidden />
-          <header className="flex items-center gap-3 px-5 pt-3 pb-3 sm:pt-7">
+          <header className="flex items-center gap-2 px-5 pt-3 pb-3 sm:pt-7">
             <h2 id="notifications-title" className="flex-1 text-xl font-semibold tracking-tight text-ink">
               Notifications
-              {inbox.unread ? <span className="ml-2 align-middle text-sm font-medium text-ink-2">{inbox.unread} new</span> : null}
             </h2>
-            {inbox.unread ? (
+            {inbox.items.length ? (
               <button
                 type="button"
-                onClick={() => void markNotificationsRead()}
-                className="h-9 rounded-full px-3 text-sm font-medium text-violet-strong hover:bg-violet-soft"
+                onClick={() => void clearNotifications()}
+                className="glass relative h-9 rounded-full px-4 text-[15px] font-semibold text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet"
               >
-                Mark all read
+                Clear
               </button>
             ) : null}
             <button
@@ -110,32 +112,54 @@ export function NotificationDrawer() {
               <X size={18} />
             </button>
           </header>
+          {inbox.unread ? (
+            <p className="-mt-2 flex items-center gap-1 px-5 pb-2 text-sm text-ink-2">
+              {inbox.unread} new ·
+              <button
+                type="button"
+                onClick={() => void markNotificationsRead()}
+                className="-mx-1.5 rounded-full px-1.5 py-0.5 font-medium text-violet-strong hover:bg-violet-soft"
+              >
+                Mark all read
+              </button>
+            </p>
+          ) : null}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-2">
           {review ? (
-            <Row
-              icon={TriangleAlert}
-              color="#EDA100"
-              title={`${review} SMS ${review === 1 ? "needs" : "need"} review`}
-              body="Folio couldn't read these automatically. Tap to see them."
-              onClick={openReview}
-            />
+            <div className="rounded-card shadow-card">
+              <Row
+                icon={TriangleAlert}
+                color="#EDA100"
+                title={`${review} SMS ${review === 1 ? "needs" : "need"} review`}
+                body="Folio couldn't read these automatically. Tap to see them."
+                onClick={openReview}
+              />
+            </div>
           ) : null}
 
           {inbox.items.length ? (
             <ul className="mt-2 space-y-2" aria-label="Notifications">
               {inbox.items.map((n) => (
                 <li key={n.id}>
-                  <Row
-                    icon={Gauge}
-                    color={n.kind === "spend_limit" ? "#FF6F4F" : "#8458F5"}
-                    title={n.title}
-                    body={n.body}
-                    meta={timeAgo(n.created_at, notificationsOpenedAt)}
-                    unread={!n.read}
-                    onClick={() => open(n)}
-                  />
+                  {/* Swipe left to delete; the drawer's background sits under the row so the red never shows through. */}
+                  <SwipeToDelete
+                    id={`note:${n.id}`}
+                    onDelete={() => dismissNotification(n.id)}
+                    className="rounded-card shadow-card"
+                    contentClassName="rounded-card bg-canvas"
+                  >
+                    <Row
+                      icon={Gauge}
+                      color={n.kind === "spend_limit" ? "#FF6F4F" : "#8458F5"}
+                      title={n.title}
+                      body={n.body}
+                      meta={timeAgo(n.created_at, notificationsOpenedAt)}
+                      unread={!n.read}
+                      onClick={() => open(n)}
+                    />
+                  </SwipeToDelete>
                 </li>
               ))}
             </ul>
@@ -144,7 +168,7 @@ export function NotificationDrawer() {
               <span className="grid size-14 place-items-center rounded-full bg-surface text-ink-3 shadow-card">
                 <BellOff size={24} aria-hidden />
               </span>
-              <p className="mt-4 font-semibold text-ink">No notifications yet</p>
+              <p className="mt-4 font-semibold text-ink">No notifications</p>
               <p className="mt-1 text-sm text-ink-2">You&apos;ll be notified here when spending reaches your weekly or monthly limit.</p>
               <button
                 type="button"
@@ -183,7 +207,7 @@ function Row({
       type="button"
       onClick={onClick}
       className={cx(
-        "flex w-full items-start gap-3 rounded-card border p-3.5 text-left shadow-card transition hover:shadow-float focus-visible:outline-2 focus-visible:outline-violet",
+        "flex w-full items-start gap-3 rounded-card border p-3.5 text-left transition focus-visible:outline-2 focus-visible:outline-violet",
         unread ? "border-violet/25 bg-surface" : "border-line/70 bg-surface/70",
       )}
     >

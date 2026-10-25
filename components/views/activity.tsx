@@ -1,11 +1,11 @@
 "use client";
 
-import { Check, Plus, Search, SearchX, X } from "lucide-react";
+import { CalendarDays, Check, Plus, Search, SearchX, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { counts, type Txn } from "@/lib/analytics";
 import { categoryName } from "@/lib/categories";
-import { formatMoney, monthLabel } from "@/lib/format";
+import { dayKey, formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
 
 import { AddTransactionSheet } from "../add-transaction";
 import { useData, type KindFilter } from "../data-provider";
@@ -14,13 +14,36 @@ import { Card, SelectPill, cx } from "../ui";
 
 const PAGE = 50;
 const ALL = "ALL";
+// Period choices besides "All time" and the months ("YYYY-MM").
+const TODAY = "today";
+const YESTERDAY = "yesterday";
+const ON_DAY = "on-day";
+
+/** Whether a transaction falls in the chosen period; days are India time, like the rest of the app. */
+function inPeriod(t: Txn, period: string, day: string, today: string, yesterday: string) {
+  switch (period) {
+    case ALL:
+      return true;
+    case TODAY:
+      return t.day === today;
+    case YESTERDAY:
+      return t.day === yesterday;
+    case ON_DAY:
+      return t.day === day;
+    default:
+      return t.month === period;
+  }
+}
 
 export function ActivityView() {
-  const { txns, months, currency, activityRequest } = useData();
+  const { txns, months, currency, today, activityRequest } = useData();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<KindFilter>("ALL");
   const [category, setCategory] = useState(ALL);
   const [period, setPeriod] = useState(ALL);
+  const [day, setDay] = useState(""); // "YYYY-MM-DD" for "Pick a date"
+  const yesterday = today ? dayKey(Date.parse(`${today}T12:00:00+05:30`) - 86_400_000) : "";
+  const dateRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(PAGE);
   const [appliedNonce, setAppliedNonce] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
@@ -71,12 +94,12 @@ export function ActivityView() {
     const q = query.trim().toLowerCase();
     return txns.filter(
       (t) =>
-        (period === ALL || t.month === period) &&
+        inPeriod(t, period, day, today, yesterday) &&
         (kind === "ALL" || (kind === "REVIEW" ? !t.is_parsed : t.is_parsed && t.type === kind)) &&
         (category === ALL || (t.is_parsed && categoryName(t) === category)) &&
         (!q || searchable.get(t.id)?.includes(q)),
     );
-  }, [txns, query, kind, category, period, searchable]);
+  }, [txns, query, kind, category, period, day, today, yesterday, searchable]);
 
   // The confirmation under the header fades after a few seconds.
   useEffect(() => {
@@ -113,6 +136,19 @@ export function ActivityView() {
     setKind("ALL");
     setCategory(ALL);
     setPeriod(ALL);
+    setDay("");
+  };
+
+  const choosePeriod = (value: string) => {
+    setVisible(PAGE);
+    if (value !== ON_DAY) return setPeriod(value);
+    setDay((current) => current || today); // until you pick a date, it shows today's
+    setPeriod(ON_DAY);
+    try {
+      dateRef.current?.showPicker(); // open the date picker straight away where the browser allows it
+    } catch {
+      // not supported here: the calendar button next to the menu opens it
+    }
   };
   const filtersActive = query || kind !== "ALL" || category !== ALL || period !== ALL;
 
@@ -120,7 +156,7 @@ export function ActivityView() {
     setAdded(txn);
     // Don't let the current filters hide what you just added.
     const visible =
-      (period === ALL || txn.month === period) &&
+      inPeriod(txn, period, day, today, yesterday) &&
       (kind === "ALL" || kind === txn.type) &&
       (category === ALL || categoryName(txn) === category) &&
       !query.trim();
@@ -223,12 +259,43 @@ export function ActivityView() {
           size="sm"
           label="Period"
           value={period}
-          onChange={(v) => {
-            setPeriod(v);
-            setVisible(PAGE);
-          }}
-          options={[{ value: ALL, label: "All time" }, ...months.map((m) => ({ value: m, label: monthLabel(m) }))]}
+          onChange={choosePeriod}
+          options={[
+            { value: ALL, label: "All time" },
+            { value: TODAY, label: "Today" },
+            { value: YESTERDAY, label: "Yesterday" },
+            { value: ON_DAY, label: period === ON_DAY && day ? `On ${shortDayLabel(day)}` : "Pick a date…" },
+            ...months.map((m) => ({ value: m, label: monthLabel(m) })),
+          ]}
         />
+        {/* The date for "Pick a date". Always in the page so the menu can open its picker. */}
+        <label
+          title="Pick another date"
+          // Hidden but still in the page when not in use, so it takes no room in the row. Only
+          // `sr-only` then: its size and position classes would otherwise win and leave a gap.
+          className={
+            period === ON_DAY
+              ? "relative grid size-8 cursor-pointer place-items-center rounded-full border border-line bg-surface text-ink shadow-card focus-within:ring-2 focus-within:ring-violet/40"
+              : "sr-only"
+          }
+        >
+          <CalendarDays size={15} aria-hidden />
+          <input
+            ref={dateRef}
+            type="date"
+            aria-label="Pick a date"
+            tabIndex={period === ON_DAY ? 0 : -1}
+            value={day}
+            max={today}
+            onChange={(e) => {
+              if (!e.target.value) return;
+              setDay(e.target.value);
+              setPeriod(ON_DAY);
+              setVisible(PAGE);
+            }}
+            className="absolute inset-0 cursor-pointer text-base opacity-0"
+          />
+        </label>
         <SelectPill
           label="Category"
           value={category}

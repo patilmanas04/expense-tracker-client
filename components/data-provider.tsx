@@ -22,6 +22,8 @@ import {
   getMe,
   getNotifications,
   getTransactionsSince,
+  clearNotifications as apiClearNotifications,
+  dismissNotification as apiDismissNotification,
   markNotificationsRead as apiMarkNotificationsRead,
   saveBalance as apiSaveBalance,
   saveLimits as apiSaveLimits,
@@ -75,12 +77,21 @@ interface DataContextValue {
   openNotifications: () => void;
   closeNotifications: () => void;
   markNotificationsRead: (ids?: string[]) => Promise<void>;
+  /** Swipe to delete one notification. */
+  dismissNotification: (id: string) => Promise<void>;
+  /** Clear every notification. */
+  clearNotifications: () => Promise<void>;
   /** Adds a transaction by hand; it appears in the lists straight away. */
   addTransaction: (input: NewTransaction) => Promise<Txn>;
   /** Edits a transaction; a new category is remembered for the merchant. */
   updateTransaction: (id: string, patch: TransactionPatch) => Promise<Txn>;
-  /** Deletes a transaction added by hand. */
-  deleteTransaction: (id: string) => Promise<void>;
+  /** Hides a transaction now and deletes it after `UNDO_MS`, unless undone. */
+  deleteTransaction: (id: string) => void;
+  /** Brings back the last deleted transaction while its undo window is open. */
+  undoDelete: () => void;
+  /** The last delete: still undoable ("pending"), or "failed" and put back. */
+  deletion: Deletion | null;
+  dismissDeletion: () => void;
   selected: Txn | null;
   openTransaction: (id: string) => void;
   closeTransaction: () => void;
@@ -89,6 +100,16 @@ interface DataContextValue {
 }
 
 const DataContext = createContext<DataContextValue | null>(null);
+
+/** How long "Undo" is offered before a delete reaches the server. */
+export const UNDO_MS = 5_000;
+
+export interface Deletion {
+  txn: Txn;
+  status: "pending" | "failed";
+  /** When the undo window closes (ms since epoch), for the countdown. */
+  until: number;
+}
 
 const STALE_AFTER_MS = 60_000;
 /** New SMS show up within this long while the app is open. */
@@ -103,6 +124,13 @@ const POLL_FAILURES_BEFORE_ALERT = 3;
 const EPOCH = "1970-01-01T00:00:00Z";
 
 const EMPTY_INBOX: Inbox = { unread: 0, items: [] };
+
+/** Leaves out notifications you've just swiped away or cleared, in case the server hasn't caught up. */
+function withoutHidden(inbox: Inbox, hidden: Set<string>): Inbox {
+  if (!hidden.size || !inbox.items.some((n) => hidden.has(n.id))) return inbox;
+  const unreadHidden = inbox.items.filter((n) => hidden.has(n.id) && !n.read).length;
+  return { unread: Math.max(0, inbox.unread - unreadHidden), items: inbox.items.filter((n) => !hidden.has(n.id)) };
+}
 
 /** Skips a re-render when a poll returns what we already have. */
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
@@ -141,6 +169,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [activityRequest, setActivityRequest] = useState<ActivityRequest | null>(null);
   const [balance, setBalance] = useState<Balance | null>(null);
   const [inbox, setInbox] = useState<Inbox>(EMPTY_INBOX);
+  const hiddenNotes = useRef(new Set<string>()); // swiped away or cleared; a poll in flight can't bring them back
   const [limits, setLimits] = useState<LimitsSummary | null>(null);
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
@@ -149,6 +178,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const pollFailures = useRef(0);
   const limitsTxns = useRef<Txn[] | null>(null); // transactions the limits were last loaded for
   const deletedIds = useRef(new Set<string>()); // so a poll already in flight can't bring one back
+  const pendingDelete = useRef<{ txn: Txn; timer: number } | null>(null); // waiting out its undo window
+  const [deletion, setDeletion] = useState<Deletion | null>(null);
 
   const apply = useCallback((result: LoadResult, initial: boolean) => {
     if (result.kind === "ok") {
@@ -156,7 +187,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setUser(result.user);
       setTxns(result.txns);
       setBalance(result.balance);
-      setInbox(result.inbox);
+      setInbox(withoutHidden(result.inbox, hiddenNotes.current));
       setToday(now);
       setMonth((m) => m || monthOf(now));
       setCurrency((c) => c || preferredCurrency(result.txns));
@@ -252,7 +283,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
         if (newest && Date.parse(newest) > Date.parse(cursorRef.current)) cursorRef.current = newest;
       }
       if (nextBalance !== undefined) setBalance((current) => (same(current, nextBalance) ? current : nextBalance));
-      if (nextInbox !== undefined) setInbox((current) => (same(current, nextInbox) ? current : nextInbox));
+      if (nextInbox !== undefined) {
+        const visible = withoutHidden(nextInbox, hiddenNotes.current);
+        setInbox((current) => (same(current, visible) ? current : visible));
+      }
       setToday(dayKey(Date.now())); // React skips the render when the day hasn't changed
       setError(null);
     } catch (e) {
@@ -280,6 +314,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(() => load(status !== "ready"), [load, status]);
 
   const signOut = useCallback(async () => {
+    const waiting = pendingDelete.current; // a delete still waiting for its undo window goes first
+    if (waiting) {
+      window.clearTimeout(waiting.timer);
+      pendingDelete.current = null;
+      await apiDeleteTransaction(waiting.txn.id).catch(() => {});
+    }
     try {
       await apiSignOut();
     } finally {
@@ -338,16 +378,83 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [reloadBalance],
   );
 
+  // Deleting is instant on screen; the server hears about it after the undo window.
+  const commitDelete = useCallback(
+    (txn: Txn, keepalive = false) => {
+      apiDeleteTransaction(txn.id, keepalive).then(
+        () => {
+          void reloadBalance();
+          void loadLimits();
+        },
+        () => {
+          // Nothing disappears silently: put it back and say so.
+          deletedIds.current.delete(txn.id);
+          setTxns((current) => mergeTransactions(current, [txn]));
+          setDeletion({ txn, status: "failed", until: Date.now() + UNDO_MS });
+        },
+      );
+    },
+    [reloadBalance, loadLimits],
+  );
+
+  /** Sends the delete waiting for its undo window right away; true if there was one. */
+  const flushDelete = useCallback(
+    (keepalive = false) => {
+      const waiting = pendingDelete.current;
+      if (!waiting) return false;
+      pendingDelete.current = null;
+      window.clearTimeout(waiting.timer);
+      commitDelete(waiting.txn, keepalive);
+      return true;
+    },
+    [commitDelete],
+  );
+
   const deleteTransaction = useCallback(
-    async (id: string) => {
-      await apiDeleteTransaction(id);
+    (id: string) => {
+      const txn = txns.find((t) => t.id === id);
+      if (!txn) return;
+      flushDelete(); // only the latest delete can be undone
       deletedIds.current.add(id);
       setSelectedId((current) => (current === id ? null : current));
       setTxns((current) => current.filter((t) => t.id !== id));
-      void reloadBalance();
+      const timer = window.setTimeout(() => {
+        if (pendingDelete.current?.txn.id !== id) return;
+        flushDelete();
+        setDeletion((current) => (current?.txn.id === id && current.status === "pending" ? null : current));
+      }, UNDO_MS);
+      pendingDelete.current = { txn, timer };
+      setDeletion({ txn, status: "pending", until: Date.now() + UNDO_MS });
     },
-    [reloadBalance],
+    [txns, flushDelete],
   );
+
+  const undoDelete = useCallback(() => {
+    const waiting = pendingDelete.current;
+    if (!waiting) return;
+    pendingDelete.current = null;
+    window.clearTimeout(waiting.timer);
+    deletedIds.current.delete(waiting.txn.id);
+    setTxns((current) => mergeTransactions(current, [waiting.txn]));
+    setDeletion(null);
+  }, []);
+
+  const dismissDeletion = useCallback(() => setDeletion(null), []);
+
+  // Leaving (closing the tab, switching apps, locking the phone) sends a waiting delete at once,
+  // so it isn't lost; the undo offer goes with it.
+  useEffect(() => {
+    const leave = () => {
+      if (document.visibilityState === "hidden" && flushDelete(true)) setDeletion((current) => (current?.status === "pending" ? null : current));
+    };
+    const close = () => flushDelete(true);
+    document.addEventListener("visibilitychange", leave);
+    window.addEventListener("pagehide", close);
+    return () => {
+      document.removeEventListener("visibilitychange", leave);
+      window.removeEventListener("pagehide", close);
+    };
+  }, [flushDelete]);
 
   const markNotificationsRead = useCallback(async (ids?: string[]) => {
     // Optimistic: the next poll corrects it if the request fails.
@@ -362,6 +469,28 @@ export function DataProvider({ children }: { children: ReactNode }) {
       // keep the optimistic state
     }
   }, []);
+
+  // Both hide at once; if the server refuses, the next poll brings the notifications back.
+  const dismissNotification = useCallback(async (id: string) => {
+    hiddenNotes.current.add(id);
+    setInbox((current) => withoutHidden(current, hiddenNotes.current));
+    try {
+      await apiDismissNotification(id);
+    } catch {
+      hiddenNotes.current.delete(id);
+    }
+  }, []);
+
+  const clearNotifications = useCallback(async () => {
+    const ids = inbox.items.map((n) => n.id);
+    ids.forEach((id) => hiddenNotes.current.add(id));
+    setInbox(EMPTY_INBOX);
+    try {
+      await apiClearNotifications();
+    } catch {
+      ids.forEach((id) => hiddenNotes.current.delete(id));
+    }
+  }, [inbox]);
 
   // Stable, so an open sheet's effects don't re-run (and move focus) whenever other data changes.
   const openNotifications = useCallback(() => setNotificationsOpenedAt(Date.now()), []);
@@ -395,9 +524,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       openNotifications,
       closeNotifications,
       markNotificationsRead,
+      dismissNotification,
+      clearNotifications,
       addTransaction,
       updateTransaction,
       deleteTransaction,
+      undoDelete,
+      deletion,
+      dismissDeletion,
       selected: (selectedId && txns.find((t) => t.id === selectedId)) || null,
       openTransaction: setSelectedId,
       closeTransaction,
@@ -426,9 +560,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
       closeNotifications,
       closeTransaction,
       markNotificationsRead,
+      dismissNotification,
+      clearNotifications,
       addTransaction,
       updateTransaction,
       deleteTransaction,
+      undoDelete,
+      deletion,
+      dismissDeletion,
       selectedId,
       activityRequest,
     ],
