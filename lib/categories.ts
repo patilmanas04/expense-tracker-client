@@ -8,6 +8,7 @@ import {
   Clapperboard,
   CreditCard,
   GraduationCap,
+  HandCoins,
   HeartPulse,
   Landmark,
   ShieldCheck,
@@ -60,7 +61,8 @@ const META: Record<string, CategoryMeta> = {
   "EMI & Loans": { color: PALETTE.red, icon: Landmark },
   "Credit Card Payment": { color: PALETTE.slate, icon: CreditCard },
   "Cash Withdrawal": { color: PALETTE.slate, icon: Banknote },
-  "Salary & Income": { color: PALETTE.green, icon: BriefcaseBusiness },
+  Salary: { color: PALETTE.green, icon: BriefcaseBusiness },
+  Income: { color: PALETTE.teal, icon: HandCoins },
   "Refunds & Cashback": { color: PALETTE.blue, icon: Undo2 },
   Transfer: { color: PALETTE.slate, icon: ArrowLeftRight },
 };
@@ -72,7 +74,13 @@ export const CATEGORY_NAMES = Object.keys(META);
 export const ALL_SPENDING = "All";
 
 /** Categories that can have a spending limit; money-in categories can't (matches limits.py). */
-export const LIMIT_CATEGORIES = CATEGORY_NAMES.filter((name) => name !== "Salary & Income" && name !== "Refunds & Cashback");
+export const LIMIT_CATEGORIES = CATEGORY_NAMES.filter((name) => !["Salary", "Income", "Refunds & Cashback"].includes(name));
+
+/** Monthly pay. Paid on or after this day of the month, it counts toward the next month's income
+ * (it's the money for that month), so it's assigned to whichever month holds most of the month
+ * after it arrives. Other money in ("Income") counts on the day it arrives. */
+export const SALARY = "Salary";
+export const SALARY_NEXT_MONTH_FROM = 16;
 
 /** `account_ref` of a transaction added by hand and paid in cash (matches balance.py). */
 export const CASH_ACCOUNT = "Cash";

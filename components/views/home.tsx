@@ -115,7 +115,7 @@ export function HomeView() {
                 label="Income"
                 minor={totals.income}
                 currency={currency}
-                info={`Money that came into your accounts in ${monthName(month)}: salary, refunds, cashback and transfers in. SMS Folio couldn't read aren't counted.`}
+                info={`Money that came into your accounts in ${monthName(month)}: refunds, cashback, transfers in and other income. Salary paid on the 16th or later counts toward the next month, the one it pays for. SMS Folio couldn't read aren't counted.`}
               />
               <MoneyCard
                 icon={Wallet}

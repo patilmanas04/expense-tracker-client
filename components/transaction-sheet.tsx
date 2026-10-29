@@ -1,11 +1,11 @@
 "use client";
 
-import { Check, Copy, MessageSquareText, Trash2, X } from "lucide-react";
+import { Check, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { parsedByLabel, type Txn } from "@/lib/analytics";
+import { carriedForward, parsedByLabel, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
-import { dateTimeLabel, formatMoney } from "@/lib/format";
+import { dateTimeLabel, formatMoney, monthLabel } from "@/lib/format";
 import type { TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
@@ -62,6 +62,7 @@ function SheetBody({ t }: { t: Txn }) {
     document.body.style.overflow = "hidden";
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented) return; // the note box handled it
       if (e.key === "Escape") {
         // Like iOS: Escape backs out of editing first, then closes.
         if (editingRef.current) {
@@ -73,7 +74,7 @@ function SheetBody({ t }: { t: Txn }) {
       }
       if (e.key !== "Tab" || !dialogRef.current) return;
       const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), [href], input, select, [tabindex]:not([tabindex='-1'])",
+        "button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
       );
       const first = focusable[0];
       const last = focusable[focusable.length - 1];
@@ -250,6 +251,7 @@ function SheetBody({ t }: { t: Txn }) {
             <dl className="divide-y divide-line rounded-card border border-line/70 bg-surface px-4 shadow-card">
               <Row label="Type">{debit ? "Money out" : "Money in"}</Row>
               <Row label="Category">{categoryName(t)}</Row>
+              {carriedForward(t) ? <Row label="Counts toward">{monthLabel(t.countsIn)}</Row> : null}
               {t.account_ref ? <Row label="Account">{t.account_ref}</Row> : null}
               {t.balance !== null ? <Row label="Balance after">{formatMoney(Math.round(t.balance * 100), t.currency)}</Row> : null}
               {t.reference_id ? (
@@ -269,10 +271,143 @@ function SheetBody({ t }: { t: Txn }) {
               <Row label={manual ? "Added by" : "Read by"}>{parsedByLabel(t)}</Row>
             </dl>
 
+            <NoteCard t={t} />
             {manual ? null : <OriginalSms text={t.raw_message} />}
           </div>
         )}
       </div>
+    </div>
+  );
+}
+
+/** Matches `MAX_NOTE_LENGTH` in the backend's main.py. */
+const MAX_NOTE = 500;
+
+/** Your own note on a transaction: where it was, what it was for. Added and changed in place. */
+function NoteCard({ t }: { t: Txn }) {
+  const { updateTransaction } = useData();
+  const areaRef = useRef<HTMLTextAreaElement>(null);
+  const addRef = useRef<HTMLButtonElement>(null);
+  const [draft, setDraft] = useState<string | null>(null); // set while writing
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const writing = draft !== null;
+  const writingRef = useRef(false);
+  const note = t.notes ?? "";
+
+  // Writing focuses the box with the caret at the end; finishing puts focus back on the button.
+  useEffect(() => {
+    const area = areaRef.current;
+    if (writing && area) {
+      area.focus({ preventScroll: true });
+      area.setSelectionRange(area.value.length, area.value.length);
+      area.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else if (writingRef.current) {
+      addRef.current?.focus();
+    }
+    writingRef.current = writing;
+  }, [writing]);
+
+  const stop = () => {
+    setDraft(null);
+    setError(null);
+  };
+  const save = async (text: string) => {
+    const next = text.trim();
+    if (next === note) return stop();
+    setSaving(true);
+    setError(null);
+    try {
+      await updateTransaction(t.id, { notes: next });
+      setDraft(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save your note.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (!writing && !note) {
+    return (
+      <button
+        ref={addRef}
+        type="button"
+        onClick={() => setDraft("")}
+        className="mt-4 flex w-full items-center gap-2 rounded-card border border-dashed border-line bg-surface/60 px-4 py-3.5 text-left text-sm font-medium text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet"
+      >
+        <Plus size={16} aria-hidden /> Add a note
+      </button>
+    );
+  }
+
+  return (
+    <div className="mt-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
+      <div className="mb-2 flex items-center justify-between gap-3">
+        <p className="flex items-center gap-2 text-sm font-medium text-ink-2">
+          <NotebookPen size={16} aria-hidden /> Note
+        </p>
+        {writing ? null : (
+          <button
+            ref={addRef}
+            type="button"
+            onClick={() => setDraft(note)}
+            aria-label="Edit note"
+            className="-my-1 rounded-full px-2 py-1 text-sm font-semibold text-violet focus-visible:outline-2 focus-visible:outline-violet"
+          >
+            Edit
+          </button>
+        )}
+      </div>
+      {writing ? (
+        <>
+          <textarea
+            ref={areaRef}
+            value={draft}
+            onChange={(e) => {
+              setDraft(e.target.value);
+              setError(null);
+            }}
+            onKeyDown={(e) => {
+              if (e.key === "Escape") {
+                e.preventDefault(); // keeps the sheet open
+                stop();
+              } else if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) {
+                e.preventDefault();
+                void save(draft);
+              }
+            }}
+            maxLength={MAX_NOTE}
+            rows={3}
+            disabled={saving}
+            aria-label="Note"
+            placeholder="Where was this, and what was it for?"
+            className="block w-full resize-none rounded-2xl border border-line bg-canvas px-3.5 py-3 text-[16px] leading-snug text-ink outline-none placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
+          />
+          {error ? (
+            <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-3 flex items-center gap-2">
+            {note ? (
+              <button type="button" onClick={() => save("")} disabled={saving} className={cx(CAPSULE, "px-2 text-expense")}>
+                Remove
+              </button>
+            ) : null}
+            <span className={cx("ml-auto text-[12px] tabular-nums text-ink-3", draft.length < MAX_NOTE - 100 && "invisible")} aria-hidden>
+              {MAX_NOTE - draft.length} left
+            </span>
+            <button type="button" onClick={stop} disabled={saving} className={cx(CAPSULE, "glass relative text-ink")}>
+              Cancel
+            </button>
+            <button type="button" onClick={() => save(draft)} disabled={saving} className={cx(CAPSULE, "glass-tint relative")}>
+              {saving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </>
+      ) : (
+        <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap text-ink">{note}</p>
+      )}
     </div>
   );
 }

@@ -1,4 +1,4 @@
-import { categoryName } from "./categories";
+import { SALARY, SALARY_NEXT_MONTH_FROM, categoryName } from "./categories";
 import {
   dayKey,
   dayOfMonth,
@@ -18,7 +18,14 @@ export interface Txn extends Transaction {
   day: string;
   month: string;
   time: number;
+  /** The month this counts toward in totals: its own, or the next for salary paid late in the month. */
+  countsIn: string;
+  /** Its day within `countsIn`: the 1st when carried forward. For same-days comparisons and daily charts. */
+  countsDay: number;
 }
+
+/** Salary paid on the 16th or later is mostly money for the next month, so it counts there. */
+export const carriedForward = (t: Pick<Txn, "countsIn" | "month">) => t.countsIn !== t.month;
 
 // The backend stores UTC; some drivers serialise it without an offset.
 const asUtc = (iso: string) => (/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`);
@@ -31,6 +38,7 @@ export function prepare(list: Transaction[]): Txn[] {
     seen.add(t.id);
     const iso = asUtc(t.transaction_time);
     const day = dayKey(iso);
+    const carried = t.type === "CREDIT" && t.is_parsed && categoryName(t) === SALARY && dayOfMonth(day) >= SALARY_NEXT_MONTH_FROM;
     out.push({
       ...t,
       transaction_time: iso,
@@ -40,6 +48,8 @@ export function prepare(list: Transaction[]): Txn[] {
       day,
       month: monthOf(day),
       time: Date.parse(iso),
+      countsIn: carried ? shiftMonth(monthOf(day), 1) : monthOf(day),
+      countsDay: carried ? 1 : dayOfMonth(day),
     });
   }
   return out.sort((a, b) => b.time - a.time);
@@ -99,13 +109,14 @@ export function monthTotals(txns: Txn[], month: string, currency: string): Month
   let count = 0;
   let review = 0;
   for (const t of txns) {
-    if (t.month !== month) continue;
-    count += 1;
-    if (!t.is_parsed) review += 1;
-    else if (t.currency === currency) {
-      if (t.type === "CREDIT") income += t.minor;
-      else expense += t.minor;
+    if (t.month === month) {
+      count += 1;
+      if (!t.is_parsed) review += 1;
     }
+    // Money counts toward its month (salary paid late in the previous month counts here).
+    if (t.countsIn !== month || !counts(t, currency)) continue;
+    if (t.type === "CREDIT") income += t.minor;
+    else expense += t.minor;
   }
   return { income, expense, net: income - expense, count, review };
 }
@@ -129,14 +140,14 @@ export function compareWithPrevious(
 ): Comparison {
   const { isCurrent, cutoff, previous } = comparisonWindow(month, today);
   const pick = (m: string) =>
-    txns.filter((t) => t.month === m && t.type === type && counts(t, currency) && dayOfMonth(t.day) <= cutoff);
+    txns.filter((t) => t.countsIn === m && t.type === type && counts(t, currency) && t.countsDay <= cutoff);
   const current = sum(pick(month));
   const prev = sum(pick(previous));
   return {
     current,
     previous: prev,
     delta: current - prev,
-    hasPrevious: txns.some((t) => t.month === previous && counts(t, currency)),
+    hasPrevious: txns.some((t) => t.countsIn === previous && counts(t, currency)),
     isCurrent,
     previousMonth: previous,
   };
@@ -165,12 +176,12 @@ export function categoryBreakdown(
   for (const t of txns) {
     if (t.type !== type || !counts(t, currency)) continue;
     const name = categoryName(t);
-    if (t.month === month) {
+    if (t.countsIn === month) {
       const entry = current.get(name) ?? { minor: 0, count: 0 };
       entry.minor += t.minor;
       entry.count += 1;
       current.set(name, entry);
-    } else if (t.month === previous && dayOfMonth(t.day) <= cutoff) {
+    } else if (t.countsIn === previous && t.countsDay <= cutoff) {
       prev.set(name, (prev.get(name) ?? 0) + t.minor);
     }
   }
@@ -205,8 +216,8 @@ export function dailySeries(txns: Txn[], month: string, currency: string, today:
     return { day, label: String(i + 1), income: 0, expense: 0 };
   });
   for (const t of txns) {
-    if (t.month !== month || !counts(t, currency)) continue;
-    const point = points[dayOfMonth(t.day) - 1];
+    if (t.countsIn !== month || !counts(t, currency)) continue;
+    const point = points[t.countsDay - 1]; // carried-forward salary lands on the 1st
     if (!point) continue;
     if (t.type === "CREDIT") point.income += t.minor;
     else point.expense += t.minor;
@@ -228,7 +239,7 @@ export function monthlyTrend(txns: Txn[], endMonth: string, currency: string, mo
   });
   const index = new Map(points.map((p) => [p.month, p]));
   for (const t of txns) {
-    const point = index.get(t.month);
+    const point = index.get(t.countsIn);
     if (!point || !counts(t, currency)) continue;
     if (t.type === "CREDIT") point.income += t.minor;
     else point.expense += t.minor;
@@ -246,7 +257,7 @@ export interface MerchantStat {
 export function topMerchants(txns: Txn[], month: string, currency: string, type: TxType, limit = 5): MerchantStat[] {
   const byKey = new Map<string, MerchantStat>();
   for (const t of txns) {
-    if (t.month !== month || t.type !== type || !counts(t, currency) || !t.merchant) continue;
+    if (t.countsIn !== month || t.type !== type || !counts(t, currency) || !t.merchant) continue;
     const key = t.merchant.trim().toLowerCase();
     const entry = byKey.get(key) ?? { name: t.merchant.trim(), minor: 0, count: 0, category: categoryName(t) };
     entry.minor += t.minor;

@@ -1,10 +1,10 @@
 "use client";
 
-import { Banknote, CornerDownRight, CreditCard, TriangleAlert } from "lucide-react";
+import { Banknote, CornerDownRight, CreditCard, NotebookPen, TriangleAlert } from "lucide-react";
 
-import { groupByDay, type Txn } from "@/lib/analytics";
+import { carriedForward, groupByDay, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/categories";
-import { dayHeading, formatMoney, timeLabel } from "@/lib/format";
+import { dayHeading, formatMoney, monthLabel, monthShortName, timeLabel } from "@/lib/format";
 
 import { useData } from "./data-provider";
 import { SwipeToDelete } from "./swipe-to-delete";
@@ -48,12 +48,27 @@ export function TransactionRow({ t }: { t: Txn }) {
               <span className="flex min-w-0 items-center gap-1.5">
                 <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(category).color }} />
                 <span className="truncate">{category}</span>
+                {carriedForward(t) ? (
+                  <span
+                    title={`Counts toward ${monthLabel(t.countsIn)}`}
+                    className="shrink-0 rounded-full bg-income-soft px-1.5 text-[11px] leading-4 font-medium whitespace-nowrap text-income"
+                  >
+                    Counts in {monthShortName(t.countsIn)}
+                  </span>
+                ) : null}
               </span>
             ) : (
               <span className="truncate font-medium text-warn">Needs review</span>
             )}
             <span className="sr-only">, {timeLabel(t.transaction_time)}</span>
           </span>
+          {t.notes ? (
+            <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
+              <NotebookPen size={13} className="shrink-0 text-ink-3" aria-hidden />
+              <span className="sr-only">Note: </span>
+              <span className="truncate">{t.notes}</span>
+            </span>
+          ) : null}
         </span>
         <span className="shrink-0 text-right">
           <span

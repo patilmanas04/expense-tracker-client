@@ -15,6 +15,8 @@ export interface Transaction {
   raw_message: string;
   is_parsed: boolean;
   parsed_by: string;
+  /** Your own note, added after the transaction arrives. */
+  notes: string | null;
   transaction_time: string;
   created_at: string;
   /** Moves on every change (an edit, a category filled in later); the polling cursor. */
@@ -44,6 +46,8 @@ export type TransactionPatch = Partial<{
   transaction_time: string;
   /** Only for transactions added by hand. */
   paid_with: "bank" | "cash";
+  /** "" removes the note. */
+  notes: string;
 }>;
 
 /** Mirrors `BalanceSummary` in the backend's balance.py. */

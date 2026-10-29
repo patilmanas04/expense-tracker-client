@@ -74,7 +74,7 @@ export function ActivityView() {
       new Map(
         txns.map((t) => [
           t.id,
-          [t.merchant, categoryName(t), t.account_ref, t.reference_id, t.sender, t.raw_message, t.amount.toFixed(2)]
+          [t.merchant, categoryName(t), t.notes, t.account_ref, t.reference_id, t.sender, t.raw_message, t.amount.toFixed(2)]
             .filter(Boolean)
             .join(" ")
             .toLowerCase(),
