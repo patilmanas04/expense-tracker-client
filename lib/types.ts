@@ -106,7 +106,7 @@ export interface AppNotification {
   kind: string;
   title: string;
   body: string;
-  /** Dashboard path to open on tap, e.g. "/settings#limits". */
+  /** Dashboard path to open on tap, e.g. "/settings/limits". */
   link: string | null;
   created_at: string;
   read: boolean;

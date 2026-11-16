@@ -22,6 +22,11 @@ export const NAV: NavItem[] = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
+/** A tab stays lit on its sub-routes too (e.g. /settings/limits is still Settings). */
+function isActive(href: string, pathname: string) {
+  return pathname === href || (href !== "/" && pathname.startsWith(`${href}/`));
+}
+
 function useSearchAction() {
   const router = useRouter();
   const { requestActivity } = useData();
@@ -37,23 +42,32 @@ const DRAG_THRESHOLD = 8; // px of sideways travel before a press becomes a drag
 interface Gesture {
   pointerId: number;
   startX: number;
-  left: number;
-  width: number;
-  slot: number;
   dragging: boolean;
 }
+
+/** The bar's geometry, read fresh on every event: a rotation mid-slide moves it. */
+interface BarBox {
+  rect: DOMRect;
+  slot: number;
+}
+
+const hasModifier = (e: { metaKey: boolean; ctrlKey: boolean; shiftKey: boolean; altKey: boolean }) =>
+  e.metaKey || e.ctrlKey || e.shiftKey || e.altKey;
 
 /**
  * Floating liquid-glass tab bar (iOS 26 style). A lens springs to the active tab; while a
  * finger is down it swells into a clear bubble. Slide along the bar and the bubble follows
- * the finger; let go to switch to the tab under it. A plain tap still works as a link.
+ * the finger; let go to switch to the tab under it. Taps and slides both navigate on release,
+ * since the browser often sends no click after one; keyboard and screen-reader activation (and
+ * modifier-clicks, for a new tab) go through the links as usual.
  * Search lives on the Home screen and in Activity, not here.
  */
 export function BottomNav() {
   const pathname = usePathname();
   const router = useRouter();
   const gesture = useRef<Gesture | null>(null);
-  const suppressClick = useRef(false);
+  /** The last press already navigated, so the click the browser may still send must not. */
+  const pointerHandled = useRef(false);
   const [pressed, setPressed] = useState<number | null>(null);
   /** While dragging: how far the lens is from the first slot, in px, following the finger. */
   const [dragOffset, setDragOffset] = useState<number | null>(null);
@@ -66,10 +80,14 @@ export function BottomNav() {
   const lensIndex = pressed ?? pending?.index ?? (activeIndex >= 0 ? activeIndex : null);
   const dragging = dragOffset !== null;
 
-  const slotAt = (g: Gesture, x: number) => Math.min(items.length - 1, Math.max(0, Math.floor((x - BAR_PADDING) / g.slot)));
+  const measure = (bar: HTMLElement): BarBox => {
+    const rect = bar.getBoundingClientRect();
+    return { rect, slot: (rect.width - BAR_PADDING * 2) / items.length };
+  };
+  const slotAt = (b: BarBox, x: number) => Math.min(items.length - 1, Math.max(0, Math.floor((x - BAR_PADDING) / b.slot)));
   // Lens centre under the finger, kept inside the capsule.
-  const centreAt = (g: Gesture, clientX: number) =>
-    Math.min(g.width - BAR_PADDING - g.slot / 2, Math.max(BAR_PADDING + g.slot / 2, clientX - g.left));
+  const centreAt = (b: BarBox, clientX: number) =>
+    Math.min(b.rect.width - BAR_PADDING - b.slot / 2, Math.max(BAR_PADDING + b.slot / 2, clientX - b.rect.left));
 
   const reset = () => {
     gesture.current = null;
@@ -78,24 +96,26 @@ export function BottomNav() {
   };
 
   const choose = (i: number) => {
-    if (i === activeIndex) return;
-    setPending({ index: i, from: pathname });
-    router.push(items[i].href);
+    if (i !== activeIndex) {
+      setPending({ index: i, from: pathname });
+      router.push(items[i].href);
+    } else if (pending) {
+      // Back to the current tab mid-navigation: Next drops the in-flight load for this push, so
+      // the pathname never changes to clear `pending`; clear it here.
+      setPending(null);
+      router.push(items[i].href);
+    }
   };
 
   const onPointerDown = (e: PointerEvent<HTMLDivElement>) => {
+    // Any click owed by the previous press has arrived by now; a stale flag would eat this one's.
+    pointerHandled.current = false;
     if (e.pointerType === "mouse" && e.button !== 0) return;
-    const rect = e.currentTarget.getBoundingClientRect();
-    const g: Gesture = {
-      pointerId: e.pointerId,
-      startX: e.clientX,
-      left: rect.left,
-      width: rect.width,
-      slot: (rect.width - BAR_PADDING * 2) / items.length,
-      dragging: false,
-    };
-    gesture.current = g;
-    setPressed(slotAt(g, e.clientX - rect.left));
+    // A second finger mustn't hijack the first one's gesture.
+    if (gesture.current && gesture.current.pointerId !== e.pointerId) return;
+    const b = measure(e.currentTarget);
+    gesture.current = { pointerId: e.pointerId, startX: e.clientX, dragging: false };
+    setPressed(slotAt(b, e.clientX - b.rect.left));
   };
 
   const onPointerMove = (e: PointerEvent<HTMLDivElement>) => {
@@ -104,29 +124,37 @@ export function BottomNav() {
     if (!g.dragging) {
       if (Math.abs(e.clientX - g.startX) < DRAG_THRESHOLD) return;
       g.dragging = true;
-      e.currentTarget.setPointerCapture(e.pointerId); // keep following even past the bar's edges
+      try {
+        e.currentTarget.setPointerCapture(e.pointerId); // keep following even past the bar's edges
+      } catch {
+        // The pointer is already gone (NotFoundError); its pointerup/cancel still ends the slide.
+      }
     }
-    const centre = centreAt(g, e.clientX);
-    setDragOffset(centre - BAR_PADDING - g.slot / 2);
-    setPressed(slotAt(g, centre));
+    const b = measure(e.currentTarget);
+    const centre = centreAt(b, e.clientX);
+    setDragOffset(centre - BAR_PADDING - b.slot / 2);
+    setPressed(slotAt(b, centre));
   };
 
   const onPointerUp = (e: PointerEvent<HTMLDivElement>) => {
     const g = gesture.current;
     if (!g || e.pointerId !== g.pointerId) return;
-    if (g.dragging) {
-      // The drag picked the tab; swallow the click the browser may still send afterwards.
-      suppressClick.current = true;
-      window.setTimeout(() => {
-        suppressClick.current = false;
-      }, 400);
-      choose(slotAt(g, centreAt(g, e.clientX)));
-    } else {
-      // A plain tap: the link's own click navigates; just hold the lens there meanwhile.
-      const i = slotAt(g, e.clientX - g.left);
-      if (i !== activeIndex) setPending({ index: i, from: pathname });
-    }
     reset();
+    // Cmd/Ctrl/Shift/Alt-clicks open a new tab or window: leave those to the link.
+    if (hasModifier(e)) return;
+    // Navigate here rather than trusting the link's click: Chrome sends none once a finger has
+    // wandered or slid, and a press released on another tab, the padding or off the bar clicks
+    // no link (or the wrong one).
+    const b = measure(e.currentTarget);
+    if (g.dragging) {
+      choose(slotAt(b, centreAt(b, e.clientX)));
+    } else {
+      // A tap released off the bar is a cancelled tap.
+      const { left, right, top, bottom } = b.rect;
+      const onBar = e.clientX >= left && e.clientX <= right && e.clientY >= top && e.clientY <= bottom;
+      if (onBar) choose(slotAt(b, e.clientX - left));
+    }
+    pointerHandled.current = true;
   };
 
   return (
@@ -140,13 +168,21 @@ export function BottomNav() {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
-        onPointerCancel={reset}
-        onPointerLeave={() => !gesture.current?.dragging && reset()}
+        onPointerCancel={(e) => {
+          if (e.pointerId === gesture.current?.pointerId) reset();
+        }}
+        onPointerLeave={(e) => {
+          // A mouse wandering off mid-press cancels it; a slide is captured and carries on.
+          const g = gesture.current;
+          if (g && e.pointerId === g.pointerId && !g.dragging) reset();
+        }}
         onClickCapture={(e) => {
-          if (!suppressClick.current) return;
+          // Swallow the click that trails a press onPointerUp already acted on. Keyboard and
+          // screen-reader clicks (detail 0, no pointerdown first) still reach the link.
+          if (!pointerHandled.current || e.detail === 0 || hasModifier(e)) return;
           e.preventDefault();
           e.stopPropagation();
-          suppressClick.current = false;
+          pointerHandled.current = false;
         }}
       >
         {lensIndex !== null ? (
@@ -185,6 +221,9 @@ export function BottomNav() {
               href={item.href}
               aria-current={active ? "page" : undefined}
               draggable={false} // stop desktop link-dragging from hijacking a slide
+              // Keyboard and screen-reader activation come through here (pointer clicks are handled
+              // on release); move the lens the same way, so Enter on the current tab mid-load clears it.
+              onNavigate={() => setPending(active ? null : { index: i, from: pathname })}
               className={className}
             >
               {body}
@@ -214,7 +253,7 @@ export function Sidebar() {
       </button>
       <nav aria-label="Main" className="mt-6 space-y-1">
         {NAV.map((nav) => {
-          const active = pathname === nav.href;
+          const active = isActive(nav.href, pathname);
           const Icon = nav.icon;
           return (
             <Link

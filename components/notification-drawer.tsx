@@ -12,7 +12,9 @@ import { useSheetDrag } from "./sheet-drag";
 import { SwipeToDelete } from "./swipe-to-delete";
 import { IconTile, cx } from "./ui";
 
-const LIMITS_PATH = "/settings#limits";
+const LIMITS_PATH = "/settings/limits";
+/** Where limit alerts linked before limits got a page of their own. */
+const OLD_LIMITS_PATH = "/settings#limits";
 
 /** Notifications behind the bell on Home: bottom sheet on phones, side panel on desktop. */
 export function NotificationDrawer() {
@@ -69,7 +71,7 @@ export function NotificationDrawer() {
   };
   const open = (n: AppNotification) => {
     if (!n.read) void markNotificationsRead([n.id]);
-    go(n.link || LIMITS_PATH);
+    go(!n.link || n.link === OLD_LIMITS_PATH ? LIMITS_PATH : n.link);
   };
   const openReview = () => {
     requestActivity({ kind: "REVIEW" });

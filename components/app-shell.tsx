@@ -1,8 +1,10 @@
 "use client";
 
 import { CloudOff, RefreshCw } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useEffect, type ReactNode } from "react";
+
+import { notePath } from "@/lib/nav-history";
 
 import { Wordmark } from "./brand";
 import { useData } from "./data-provider";
@@ -20,6 +22,10 @@ export function Ready({ children }: { children: ReactNode }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const { status, error, refresh, refreshing } = useData();
   const router = useRouter();
+  // Pages under a tab (Settings → Spending limits) have a back button instead of the tab bar.
+  const pathname = usePathname();
+  const subpage = pathname.split("/").filter(Boolean).length > 1;
+  useEffect(() => notePath(pathname), [pathname]);
   const leaving = status === "signed-out" || status === "expired";
 
   // proxy.ts keeps signed-out visitors away; this covers sessions that end while the app
@@ -65,8 +71,8 @@ export function AppShell({ children }: { children: ReactNode }) {
           </button>
         </div>
       ) : null}
-      <main className="pb-nav">{children}</main>
-      <BottomNav />
+      <main className={subpage ? undefined : "pb-nav"}>{children}</main>
+      {subpage ? null : <BottomNav />}
       <TransactionSheet />
       <NotificationDrawer />
       <UndoToast />
