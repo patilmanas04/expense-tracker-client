@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeIndianRupee, Bell, ChevronRight, Landmark, Search, Sparkles, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Bell, ChevronRight, Search, Sparkles, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
@@ -13,7 +13,7 @@ import {
   spendingPace,
 } from "@/lib/analytics";
 import { categoryMeta } from "@/lib/categories";
-import { dayKey, formatMoney, formatPercent, monthLabel, monthName, shortDayLabel, toMinor } from "@/lib/format";
+import { formatMoney, formatPercent, monthLabel, monthName } from "@/lib/format";
 
 import { Donut } from "../charts/donut";
 import { useData } from "../data-provider";
@@ -91,8 +91,6 @@ export function HomeView() {
                 {comparisonText}
               </p>
             </div>
-
-            <BalanceLeft />
           </section>
 
           {/* Content sheet that overlaps the header on phones */}
@@ -213,46 +211,6 @@ export function HomeView() {
         </aside>
       </div>
     </div>
-  );
-}
-
-/** Running bank balance under the spend figure; links to Settings to set or update it. */
-function BalanceLeft() {
-  const { balance } = useData();
-  const card =
-    "mx-auto mt-6 flex w-full max-w-sm items-center gap-3 rounded-2xl bg-white/15 px-4 py-3 text-left ring-1 ring-white/25 backdrop-blur-md transition hover:bg-white/20";
-  if (!balance) {
-    return (
-      <Link href="/settings#balance" className={card}>
-        <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white/20">
-          <Landmark size={19} aria-hidden />
-        </span>
-        <span className="flex-1 text-[14px] leading-snug font-medium">Set your bank balance to see what&apos;s left</span>
-        <ChevronRight size={18} className="shrink-0 text-white/70" aria-hidden />
-      </Link>
-    );
-  }
-  return (
-    <Link href="/settings#balance" className={card} aria-label={`Balance left ${formatMoney(toMinor(balance.current), balance.currency)}. Update in settings`}>
-      <span className="grid size-10 shrink-0 place-items-center rounded-full bg-white/20">
-        <Landmark size={19} aria-hidden />
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block text-[13px] text-white/80">Balance left</span>
-        <Amount
-          minor={toMinor(balance.current)}
-          currency={balance.currency}
-          sign={balance.current < 0 ? "−" : ""}
-          className="block truncate text-[22px] leading-tight font-bold tracking-tight"
-          fractionClassName="text-white/60"
-        />
-      </span>
-      <span className="shrink-0 text-right text-[12px] leading-tight text-white/75">
-        since
-        <br />
-        {shortDayLabel(dayKey(balance.as_of))}
-      </span>
-    </Link>
   );
 }
 
