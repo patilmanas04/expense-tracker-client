@@ -27,11 +27,12 @@ import {
   markNotificationsRead as apiMarkNotificationsRead,
   saveBalance as apiSaveBalance,
   saveLimits as apiSaveLimits,
+  saveMerchantLimit as apiSaveMerchantLimit,
   signOut as apiSignOut,
   updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
 import { dayKey, monthOf } from "@/lib/format";
-import type { Balance, Inbox, LimitsInput, LimitsSummary, NewTransaction, TransactionPatch, User } from "@/lib/types";
+import type { Balance, Inbox, LimitsInput, LimitsSummary, MerchantLimitInput, NewTransaction, TransactionPatch, User } from "@/lib/types";
 
 /** "expired": the backend rejected the session cookie; "signed-out": you signed out. */
 export type Status = "loading" | "signed-out" | "expired" | "ready" | "error";
@@ -66,9 +67,11 @@ interface DataContextValue {
   balance: Balance | null;
   saveBalance: (amount: string) => Promise<void>;
   clearBalance: () => Promise<void>;
-  /** Weekly/monthly spend limits, overall and per category, with what's been spent; null until loaded. */
+  /** Weekly/monthly spend limits, overall, per category and per merchant, with what's been spent; null until loaded. */
   limits: LimitsSummary | null;
   saveLimits: (limits: LimitsInput) => Promise<LimitsSummary>;
+  /** Adds, changes or removes one merchant's limit. */
+  saveMerchantLimit: (body: MerchantLimitInput) => Promise<LimitsSummary>;
   /** In-app notifications (bell on Home). */
   inbox: Inbox;
   notificationsOpen: boolean;
@@ -348,6 +351,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return next;
   }, []);
 
+  const saveMerchantLimit = useCallback(async (body: MerchantLimitInput) => {
+    const next = await apiSaveMerchantLimit(body);
+    setLimits(next);
+    return next;
+  }, []);
+
   // The balance moves with a bank entry; the next poll would catch it, this is just sooner.
   const reloadBalance = useCallback(
     () => getBalance().then((next) => setBalance((current) => (same(current, next) ? current : next)), () => {}),
@@ -518,6 +527,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       clearBalance,
       limits,
       saveLimits,
+      saveMerchantLimit,
       inbox,
       notificationsOpen: notificationsOpenedAt > 0,
       notificationsOpenedAt,
@@ -554,6 +564,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       clearBalance,
       limits,
       saveLimits,
+      saveMerchantLimit,
       inbox,
       notificationsOpenedAt,
       openNotifications,

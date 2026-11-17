@@ -13,7 +13,7 @@ import { Amount, Avatar, Card, IconTile, Segmented, SelectPill } from "../ui";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
 
 export function SettingsView() {
-  const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut } = useData();
+  const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut, requestActivity } = useData();
   const [signingOut, setSigningOut] = useState(false);
 
   // Home links to /settings#balance; routes stay mounted, so this runs each time Settings is shown.
@@ -47,7 +47,23 @@ export function SettingsView() {
       <Group title="Data">
         <Row label="Transactions" value={String(txns.length)} />
         <Row label="Tracking since" value={oldest ? longDayLabel(oldest.day) : "—"} />
-        <Row label="Needs review" value={String(review)} />
+        {review ? (
+          // Opens Activity with "Needs review" selected.
+          <Link
+            href="/activity"
+            onClick={() => requestActivity({ kind: "REVIEW" })}
+            aria-label={`Needs review: ${review}. Show in Activity`}
+            className="flex min-h-14 items-center justify-between gap-4 px-4 py-2.5 transition hover:bg-canvas/60 active:bg-canvas/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet"
+          >
+            <span className="text-[15px] text-ink">Needs review</span>
+            <span className="flex items-center gap-1.5 text-[15px] text-ink-2">
+              {review}
+              <ChevronRight size={18} className="-mr-1 shrink-0 text-ink-3" aria-hidden />
+            </span>
+          </Link>
+        ) : (
+          <Row label="Needs review" value="0" />
+        )}
         <Row label="Updates" value={`Live · every ${POLL_INTERVAL_MS / 1000}s`}>
           <button
             type="button"
@@ -274,7 +290,7 @@ function LimitsSection() {
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-medium text-ink">Manage spending limits</span>
             <span className="block truncate text-[13px] text-ink-2">
-              {count ? `${count} ${count === 1 ? "limit" : "limits"} set` : "Weekly or monthly, overall or per category"}
+              {count ? `${count} ${count === 1 ? "limit" : "limits"} set` : "Overall, per category or per merchant"}
             </span>
           </span>
           <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />

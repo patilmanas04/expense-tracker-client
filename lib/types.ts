@@ -82,6 +82,17 @@ export interface CategoryLimitStatus {
   monthly: PeriodLimit;
 }
 
+/** A merchant with a spending limit of its own (`MerchantLimitStatus` in limits.py). */
+export interface MerchantLimitStatus {
+  id: string;
+  /** Exactly as picked or typed; identity includes case ("Swiggy" and "SWIGGY" are two limits). */
+  merchant: string;
+  /** Payment names this limit counts (all time), most payments first; empty before the first one. */
+  counts: string[];
+  weekly: PeriodLimit;
+  monthly: PeriodLimit;
+}
+
 export interface LimitsSummary {
   currency: string;
   /** Overall ("All spending"). */
@@ -89,6 +100,8 @@ export interface LimitsSummary {
   monthly: PeriodLimit;
   /** Only categories that have a limit, in category order. */
   categories: CategoryLimitStatus[];
+  /** Merchant limits, oldest first. */
+  merchants: MerchantLimitStatus[];
   email: { configured: boolean; to: string | null; last_error: string | null };
 }
 
@@ -98,6 +111,30 @@ export interface LimitsInput {
   category: string | null;
   weekly_limit: string | null;
   monthly_limit: string | null;
+}
+
+/** Body of `PUT /api/v1/limits/merchants`. Both limits null removes the merchant's limit. */
+export interface MerchantLimitInput {
+  /** The limit being changed or removed; the server answers "This limit was deleted." if it's gone. */
+  id?: string | null;
+  merchant: string;
+  weekly_limit: string | null;
+  monthly_limit: string | null;
+  /** Only for a merchant the server doesn't know yet (a spending category); ignored otherwise. */
+  category: string | null;
+}
+
+/** One entry of `GET /api/v1/limits/merchants/known`: a merchant paid before, or typed in earlier. */
+export interface KnownMerchant {
+  name: string;
+  /** 0 for a typed merchant not paid yet. */
+  payments: number;
+}
+
+/** `GET /api/v1/limits/merchants/preview`: is the name known, and which payment names it would count. */
+export interface MerchantPreview {
+  known: boolean;
+  counts: string[];
 }
 
 /** Mirrors `NotificationOut` / `Inbox` in the backend's notifications.py. */
