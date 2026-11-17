@@ -70,8 +70,10 @@ export function ReportView() {
       />
 
       {/* Phones: report, categories, pace, merchants (reference order).
-          Desktop: report/pace/merchants stacked left, categories right. */}
-      <div className="mt-6 grid gap-6 lg:grid-cols-2 lg:items-start">
+          Desktop: report/pace/merchants stacked left, categories right.
+          grid-cols-1 (minmax(0, 1fr)) keeps the phone column at the screen's width: an implicit
+          `auto` column would grow to fit a long merchant name and push the page sideways. */}
+      <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
         <div className="contents lg:flex lg:flex-col lg:gap-6">
         <Card className="order-1 p-5 sm:p-6">
           <div className="flex items-center justify-between gap-3">
