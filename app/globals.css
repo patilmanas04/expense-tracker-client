@@ -95,6 +95,16 @@ body {
   overscroll-behavior-y: none;
 }
 
+/* The page only ever scrolls vertically: anything wider than the screen is cut off instead of
+   letting a sideways or diagonal drag pan the page. `clip` (not `hidden`) doesn't make a scroll
+   container, so `position: sticky` keeps working. Horizontal gestures inside the page (swipe to
+   delete) are untouched: no `touch-action` here. */
+html,
+body {
+  overflow-x: clip;
+  overscroll-behavior-x: none;
+}
+
 /* Violet header with the diagonal sheen from the reference. */
 .hero-bg {
   --hero-ring: #a37df9;

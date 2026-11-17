@@ -1,4 +1,16 @@
-import type { Balance, Inbox, LimitsInput, LimitsSummary, NewTransaction, Transaction, TransactionPatch, User } from "./types";
+import type {
+  Balance,
+  Inbox,
+  KnownMerchant,
+  LimitsInput,
+  LimitsSummary,
+  MerchantLimitInput,
+  MerchantPreview,
+  NewTransaction,
+  Transaction,
+  TransactionPatch,
+  User,
+} from "./types";
 
 export class ApiError extends Error {
   constructor(
@@ -26,10 +38,18 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     try {
       const body = await response.json();
       if (typeof body?.detail === "string") detail = body.detail;
+      else if (Array.isArray(body?.detail)) {
+        // FastAPI's field errors: a list of {msg}, each validator's message behind "Value error, ".
+        const messages = body.detail
+          .map((item: { msg?: unknown }) => (typeof item?.msg === "string" ? item.msg.replace(/^Value error, /, "") : ""))
+          .filter(Boolean);
+        if (messages.length) detail = messages.join(" ");
+      }
     } catch {
       // Non-JSON error page from the proxy; keep the generic message.
     }
-    throw new ApiError(response.status, detail);
+    // HTTP/2 has no status text, so a bare 4xx would otherwise come with no message at all.
+    throw new ApiError(response.status, detail || `Something went wrong (status ${response.status}).`);
   }
   if (response.status === 204) return undefined as T;
   return response.json() as Promise<T>;
@@ -55,7 +75,10 @@ export const saveBalance = (amount: string) =>
 
 export const clearBalance = () => request<{ status: string }>("/api/v1/balance", { method: "DELETE" });
 
-export const getLimits = () => request<LimitsSummary>("/api/v1/limits");
+/** A backend from before merchant limits sends no `merchants`; the app always gets a list. */
+const withMerchants = (summary: LimitsSummary): LimitsSummary => ({ ...summary, merchants: summary.merchants ?? [] });
+
+export const getLimits = () => request<LimitsSummary>("/api/v1/limits").then(withMerchants);
 
 export const getNotifications = () => request<Inbox>("/api/v1/notifications?limit=30");
 
@@ -79,7 +102,22 @@ export const saveLimits = (limits: LimitsInput) =>
     method: "PUT",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
     body: JSON.stringify(limits),
-  });
+  }).then(withMerchants);
+
+/** Adds, changes or (both limits null) removes one merchant's limit; returns the whole summary. */
+export const saveMerchantLimit = (body: MerchantLimitInput) =>
+  request<LimitsSummary>("/api/v1/limits/merchants", {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  }).then(withMerchants);
+
+/** Merchants paid before or typed in earlier, most payments first: the limit sheet's suggestions. */
+export const getKnownMerchants = () => request<KnownMerchant[]>("/api/v1/limits/merchants/known");
+
+/** Whether the server knows this merchant, and which payment names a limit on it would count. */
+export const previewMerchant = (merchant: string) =>
+  request<MerchantPreview>(`/api/v1/limits/merchants/preview?merchant=${encodeURIComponent(merchant)}`);
 
 /** A transaction added by hand (cash, or anything without an SMS). */
 export const addTransaction = (input: NewTransaction) =>
