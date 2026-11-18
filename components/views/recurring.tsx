@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useId, useState } from "react";
 
-import { formatMoney, longDayLabel, shortDayLabel, toMinor } from "@/lib/format";
+import { decimalMoney, formatMoney, longDayLabel, shortDayLabel, toMinor } from "@/lib/format";
 import { cameFromApp } from "@/lib/nav-history";
 import type { Cadence, RecurringDecision, RecurringSeries, RecurringSummary } from "@/lib/types";
 
@@ -19,12 +19,6 @@ export const RECURRING_PAGE = "/report/recurring";
 const CARD_PREVIEW = 3;
 
 const CADENCE_LABEL: Record<Cadence, string> = { weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" };
-
-/** A decimal string as money, decimals only when there are paise: "₹649", "₹10,688.10". */
-const money = (text: string, currency: string) => {
-  const minor = toMinor(Number(text));
-  return formatMoney(minor, currency, { decimals: minor % 100 !== 0 });
-};
 
 /** The monthly total, whole rupees (the server already rounded it): "₹24,067". */
 const monthly = (summary: RecurringSummary) =>
@@ -82,7 +76,7 @@ export function RecurringCard() {
                     <p className="truncate text-[13px] text-ink-2">Next {dayLabel(s.next_expected, today)}</p>
                   )}
                 </div>
-                <span className="shrink-0 text-[15px] font-semibold tabular-nums text-ink">{money(s.amount, recurring.currency)}</span>
+                <span className="shrink-0 text-[15px] font-semibold tabular-nums text-ink">{decimalMoney(s.amount, recurring.currency)}</span>
               </li>
             ))}
           </ul>
@@ -239,7 +233,7 @@ export function RecurringView() {
                     <div className="min-w-0 flex-1">
                       <p className="truncate text-[15px] font-semibold text-ink">{s.name}</p>
                       <p className="truncate text-[13px] text-ink-2">
-                        {CADENCE_LABEL[s.cadence]} · {money(s.amount, recurring.currency)}
+                        {CADENCE_LABEL[s.cadence]} · {decimalMoney(s.amount, recurring.currency)}
                       </p>
                     </div>
                     <button
@@ -339,14 +333,14 @@ function SeriesRow({
               ) : null}
               {s.previous_amount ? (
                 <span className="max-w-full truncate rounded-full bg-track px-2 py-0.5 text-xs font-medium text-ink-2">
-                  was {money(s.previous_amount, currency)}
+                  was {decimalMoney(s.previous_amount, currency)}
                 </span>
               ) : null}
             </span>
           ) : null}
         </span>
         <span className={cx("shrink-0 text-[15px] font-semibold tabular-nums", isCancelled ? "text-ink-2" : "text-ink")}>
-          {money(s.amount, currency)}
+          {decimalMoney(s.amount, currency)}
         </span>
       </button>
       {expanded ? (

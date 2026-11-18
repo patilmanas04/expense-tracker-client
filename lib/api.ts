@@ -21,6 +21,7 @@ import type {
   Settings,
   Transaction,
   TransactionPatch,
+  UpcomingList,
   User,
 } from "./types";
 
@@ -246,6 +247,13 @@ export const clearRecurringDecision = (body: { merchant_key: string; cadence: Ca
     headers: JSON_HEADERS,
     body: JSON.stringify(body),
   });
+
+/** What's due: notices (auto-debits, card bills) and payments expected from recurring series, `days` from today (1–62). */
+export const getUpcoming = (days = 30) => request<UpcomingList>(`/api/v1/upcoming?days=${days}`);
+
+/** Hides one notice (auto-debit or card bill); 204, also when already hidden. 404 when unknown. */
+export const dismissUpcoming = (id: string) =>
+  request<void>(`/api/v1/upcoming/${encodeURIComponent(id)}/dismiss`, { method: "POST" });
 
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 

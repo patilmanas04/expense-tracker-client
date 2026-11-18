@@ -165,6 +165,12 @@ export function formatMoney(
   return sign + text;
 }
 
+/** A decimal string as money, decimals only when there are paise: "₹649", "₹10,688.10". */
+export function decimalMoney(text: string, currency: string): string {
+  const minor = toMinor(Number(text));
+  return formatMoney(minor, currency, { decimals: minor % 100 !== 0 });
+}
+
 /** Splits "₹42,124.67" into "₹42,124" and ".67" so decimals can be de-emphasised. */
 export function moneyParts(minor: number, currency: string) {
   const parts = formatter(currency, { minimumFractionDigits: 2, maximumFractionDigits: 2 }).formatToParts(

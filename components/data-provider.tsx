@@ -20,6 +20,7 @@ import {
   clearBalance as apiClearBalance,
   clearRecurringDecision as apiClearRecurringDecision,
   deleteTransaction as apiDeleteTransaction,
+  dismissUpcoming as apiDismissUpcoming,
   getAllTransactions,
   getBalance,
   getLimits,
@@ -29,6 +30,7 @@ import {
   getRecurring,
   getSettings,
   getTransactionsSince,
+  getUpcoming,
   clearNotifications as apiClearNotifications,
   dismissNotification as apiDismissNotification,
   markNotDuplicate as apiMarkNotDuplicate,
@@ -56,6 +58,7 @@ import type {
   RecurringSummary,
   Settings,
   TransactionPatch,
+  UpcomingList,
   User,
 } from "@/lib/types";
 
@@ -118,6 +121,17 @@ interface DataContextValue {
    * but the reload failed (`recurring` still shows the series where it was).
    */
   decideRecurring: (merchantKey: string, cadence: Cadence, status: RecurringDecision | null) => Promise<boolean>;
+  /** What's due in the next 30 days (Home's Upcoming card and /upcoming); null until loaded. */
+  upcoming: UpcomingList | null;
+  /** The last load of `upcoming` failed (it keeps its last value). */
+  upcomingFailed: boolean;
+  /** Reloads `upcoming`; never throws: resolves false when it failed (which also sets `upcomingFailed`). */
+  refreshUpcoming: () => Promise<boolean>;
+  /**
+   * Dismisses one notice (auto-debit or card bill): it leaves `upcoming` at once, then the list reloads. Throws
+   * ApiError when the dismiss fails (`upcoming` untouched); resolves false when it saved but the reload failed.
+   */
+  dismissUpcoming: (id: string) => Promise<boolean>;
   /** Alert settings and the like; null until loaded, or when the server didn't answer. */
   settings: Settings | null;
   /** Changes only the keys given. Throws ApiError; a 422 message names the key ("<key>: <message>"). */
@@ -261,6 +275,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [periods, setPeriods] = useState<PayPeriods | null>(null); // null = never loaded: calendar months
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringFailed, setRecurringFailed] = useState(false);
+  const [upcoming, setUpcoming] = useState<UpcomingList | null>(null);
+  const [upcomingFailed, setUpcomingFailed] = useState(false);
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
   const lastSyncedRef = useRef(0);
@@ -367,6 +383,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Optional as well; flagged like recurring so the Upcoming screen can offer Try again.
+  const loadUpcoming = useCallback(
+    () =>
+      getUpcoming().then(
+        (next) => {
+          setUpcoming((current) => (same(current, next) ? current : next));
+          setUpcomingFailed(false);
+          return true;
+        },
+        () => {
+          setUpcomingFailed(true);
+          return false;
+        },
+      ),
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
     inFlight.current = true;
@@ -389,19 +422,26 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [],
   );
 
-  // New SMS change what's been spent, what recurs and where pay periods start: refresh the meters, recurring and
-  // periods. The first load already has them, unless it failed and a retry (Try again, coming back to the tab) is
-  // what made the app ready.
+  // New SMS change what's been spent, what recurs, where pay periods start and what's been paid: refresh the
+  // meters, recurring, periods and upcoming. The first load already has them, unless it failed and a retry (Try
+  // again, coming back to the tab) is what made the app ready.
   useEffect(() => {
     if (status !== "ready") return;
     if (limitsTxns.current === null ? reloadOptional.current : limitsTxns.current !== txns) {
       void loadLimits();
       void loadRecurring();
       void loadPeriods();
+      void loadUpcoming();
     }
     reloadOptional.current = false;
     limitsTxns.current = txns;
-  }, [status, txns, loadLimits, loadRecurring, loadPeriods]);
+  }, [status, txns, loadLimits, loadRecurring, loadPeriods, loadUpcoming]);
+
+  // Upcoming loads once the app is ready (it needs the session), then again on each IST day change: what's due
+  // and what's late move with the date. `today` only changes when the day does.
+  useEffect(() => {
+    if (status === "ready" && today) void loadUpcoming();
+  }, [status, today, loadUpcoming]);
 
   // Coming back to the tab/home-screen app picks up SMS that arrived meanwhile.
   useEffect(() => {
@@ -489,6 +529,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setPeriods(null);
       setRecurring(null);
       setRecurringFailed(false);
+      setUpcoming(null);
+      setUpcomingFailed(false);
       setSelectedId(null);
       setStatus("signed-out");
     }
@@ -519,9 +561,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     async (merchantKey: string, cadence: Cadence, status: RecurringDecision | null) => {
       if (status) await apiSetRecurringDecision({ merchant_key: merchantKey, cadence, status });
       else await apiClearRecurringDecision({ merchant_key: merchantKey, cadence });
+      void loadUpcoming(); // its expected items follow the series
       return loadRecurring(); // the decision is saved either way; false = the list couldn't reload
     },
-    [loadRecurring],
+    [loadRecurring, loadUpcoming],
+  );
+
+  const dismissUpcoming = useCallback(
+    async (id: string) => {
+      await apiDismissUpcoming(id); // throws ApiError, leaving the list as it was
+      setUpcoming((current) => current && { ...current, items: current.items.filter((i) => i.id !== id) });
+      return loadUpcoming(); // dismissed either way; false = the list couldn't reload
+    },
+    [loadUpcoming],
   );
 
   const saveSettings = useCallback(async (changes: Partial<Settings>) => {
@@ -601,6 +653,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           // The list changed on screen before the server deleted it, so the txns effect reloaded too early.
           void loadRecurring();
           void loadPeriods();
+          void loadUpcoming();
         },
         () => {
           // Nothing disappears silently: put it back and say so.
@@ -611,7 +664,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         },
       );
     },
-    [reloadBalance, loadLimits, loadRecurring, loadPeriods, settle],
+    [reloadBalance, loadLimits, loadRecurring, loadPeriods, loadUpcoming, settle],
   );
 
   /** Sends the delete waiting for its undo window right away; true if there was one. */
@@ -755,6 +808,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       recurringFailed,
       refreshRecurring: loadRecurring,
       decideRecurring,
+      upcoming,
+      upcomingFailed,
+      refreshUpcoming: loadUpcoming,
+      dismissUpcoming,
       settings,
       saveSettings,
       cal,
@@ -810,6 +867,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       recurringFailed,
       loadRecurring,
       decideRecurring,
+      upcoming,
+      upcomingFailed,
+      loadUpcoming,
+      dismissUpcoming,
       settings,
       saveSettings,
       cal,

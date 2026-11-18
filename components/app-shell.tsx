@@ -12,6 +12,7 @@ import { BottomNav, Sidebar } from "./nav";
 import { NotificationDrawer } from "./notification-drawer";
 import { TransactionSheet } from "./transaction-sheet";
 import { UndoToast } from "./undo-toast";
+import { UPCOMING_PAGE } from "./views/upcoming";
 
 /** Pages render through this gate so the route itself is always part of the static shell. */
 export function Ready({ children }: { children: ReactNode }) {
@@ -22,9 +23,10 @@ export function Ready({ children }: { children: ReactNode }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const { status, error, refresh, refreshing } = useData();
   const router = useRouter();
-  // Pages under a tab (Settings → Spending limits) have a back button instead of the tab bar.
+  // Pages under a tab (Settings → Spending limits), and Upcoming's See all page, have a back button instead of
+  // the tab bar.
   const pathname = usePathname();
-  const subpage = pathname.split("/").filter(Boolean).length > 1;
+  const subpage = pathname.split("/").filter(Boolean).length > 1 || pathname === UPCOMING_PAGE;
   useEffect(() => notePath(pathname), [pathname]);
   const leaving = status === "signed-out" || status === "expired";
 

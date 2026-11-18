@@ -296,6 +296,41 @@ export interface RecurringSummary {
 /** A decision on a series (server: recurring_decisions.status); clearing it is a separate call. */
 export type RecurringDecision = "dismissed" | "cancelled";
 
+/** What an upcoming item is (server: upcoming.py): a bank's auto-debit notice, a card bill, or a recurring series' next payment. */
+export type UpcomingKind = "auto_debit" | "card_bill" | "expected";
+
+/**
+ * "paid": a matching payment was seen; "not_seen": none seen and the due date has gone (auto-debits: by 5 days);
+ * "late": an expected payment past its date; "upcoming": otherwise.
+ */
+export type UpcomingStatus = "upcoming" | "paid" | "not_seen" | "late";
+
+/** Mirrors `UpcomingItemOut` in the backend's upcoming.py. Amounts are decimal strings, `date` "YYYY-MM-DD" (IST). */
+export interface UpcomingItem {
+  /** The notice's id (dismiss with it); null for an item expected from a recurring series. */
+  id: string | null;
+  kind: UpcomingKind;
+  payee: string;
+  /** "HDFC XX9012" for notices that name the account or card; always null for expected items. */
+  account_ref: string | null;
+  amount: string;
+  /** A card bill's minimum due; null otherwise. */
+  min_amount: string | null;
+  /** The due date; for expected items, the series' next expected date. */
+  date: string;
+  status: UpcomingStatus;
+  /** Card bills: card payments received since the notice; "0.00" otherwise. */
+  paid_amount: string;
+  /** Whether the money leaves the bank account (false for card-charged and cash items). */
+  leaves_bank: boolean;
+}
+
+/** Mirrors `UpcomingList` in upcoming.py: sorted by date, then card bills, auto-debits, expected, then payee. No total. */
+export interface UpcomingList {
+  currency: string;
+  items: UpcomingItem[];
+}
+
 /** Every setting (server: settings_store.KEYS). Later designs add their keys here. */
 export interface Settings {
   /** Whole rupees; null = Off. */
