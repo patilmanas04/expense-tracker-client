@@ -21,6 +21,8 @@ export interface Transaction {
   created_at: string;
   /** Moves on every change (an edit, a category filled in later); the polling cursor. */
   updated_at: string;
+  /** The earlier transaction this may be a second record of, while you haven't decided; it then counts nowhere. */
+  duplicate_of: string | null;
 }
 
 /** Mirrors `ManualTransactionInput` in the backend's main.py. */

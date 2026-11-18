@@ -3,7 +3,7 @@
 import { Banknote, CornerDownRight, CreditCard, NotebookPen, TriangleAlert } from "lucide-react";
 import { useRouter } from "next/navigation";
 
-import { carriedForward, groupByDay, type Txn } from "@/lib/analytics";
+import { carriedForward, groupByDay, isHeldOut, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/categories";
 import { dayHeading, formatMoney, monthLabel, monthShortName, timeLabel } from "@/lib/format";
 
@@ -52,6 +52,8 @@ export function TransactionRow({ t }: { t: Txn }) {
   const { openTransaction, deleteTransaction } = useData();
   const category = categoryName(t);
   const debit = t.type === "DEBIT";
+  // A possible duplicate: greyed, with a chip saying why, and counted nowhere until you decide.
+  const held = isHeldOut(t);
   return (
     <SwipeToDelete
       id={`txn:${t.id}`}
@@ -65,15 +67,23 @@ export function TransactionRow({ t }: { t: Txn }) {
         className="flex w-full items-center gap-3.5 rounded-card p-3.5 text-left focus-visible:outline-2 focus-visible:outline-violet sm:p-4"
       >
         {t.is_parsed ? (
-          <CategoryTile name={category} />
+          <span className={cx("shrink-0", held && "opacity-50")}>
+            <CategoryTile name={category} />
+          </span>
         ) : (
           <IconTile icon={TriangleAlert} color="#EDA100" />
         )}
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[16px] font-semibold text-ink">{transactionTitle(t)}</span>
+          <span className={cx("block truncate text-[16px] font-semibold", held ? "text-ink-2" : "text-ink")}>{transactionTitle(t)}</span>
           <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
             <CornerDownRight size={14} className="shrink-0 text-ink-3" aria-hidden />
-            {t.is_parsed ? (
+            {held ? (
+              // Only the chip: with the category beside it, it overran the amount on narrow phones.
+              // It counts nowhere, so "Counts in" doesn't apply either; the sheet still shows both.
+              <span className="min-w-0 truncate rounded-full bg-warn-soft px-1.5 text-[11px] leading-4 font-medium text-warn">
+                Possible duplicate
+              </span>
+            ) : t.is_parsed ? (
               <span className="flex min-w-0 items-center gap-1.5">
                 <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(category).color }} />
                 <span className="truncate">{category}</span>
@@ -90,6 +100,7 @@ export function TransactionRow({ t }: { t: Txn }) {
               <span className="truncate font-medium text-warn">Needs review</span>
             )}
             <span className="sr-only">, {timeLabel(t.transaction_time)}</span>
+            {held ? <span className="sr-only">, possible duplicate, not counted</span> : null}
           </span>
           {t.notes ? (
             <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
@@ -103,7 +114,7 @@ export function TransactionRow({ t }: { t: Txn }) {
           <span
             className={cx(
               "block text-[16px] font-semibold tabular-nums",
-              !t.is_parsed ? "text-ink-3" : debit ? "text-expense" : "text-income",
+              !t.is_parsed || held ? "text-ink-3" : debit ? "text-expense" : "text-income",
             )}
           >
             {t.is_parsed ? formatMoney(debit ? -t.minor : t.minor, t.currency, { signed: true }) : "—"}

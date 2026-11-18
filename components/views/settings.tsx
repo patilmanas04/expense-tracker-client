@@ -4,6 +4,7 @@ import { ChevronRight, Gauge, Landmark, LogOut, Mail, RefreshCw, Share, SquarePl
 import Link from "next/link";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
+import { needsReview } from "@/lib/analytics";
 import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, toMinor } from "@/lib/format";
 
 import { FolioMark } from "../brand";
@@ -21,7 +22,7 @@ export function SettingsView() {
     const target = window.location.hash ? document.getElementById(window.location.hash.slice(1)) : null;
     if (target) requestAnimationFrame(() => target.scrollIntoView({ behavior: "smooth", block: "start" }));
   }, []);
-  const review = txns.filter((t) => !t.is_parsed).length;
+  const review = txns.filter(needsReview).length;
   const oldest = txns[txns.length - 1];
 
   return (

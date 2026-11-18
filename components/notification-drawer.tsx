@@ -1,9 +1,10 @@
 "use client";
 
-import { BellOff, ChevronRight, Gauge, TriangleAlert, X, type LucideIcon } from "lucide-react";
+import { BellOff, ChevronRight, Copy, Gauge, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
+import { needsReview } from "@/lib/analytics";
 import { timeAgo } from "@/lib/format";
 import { activityRequestFromLink } from "@/lib/links";
 import type { AppNotification } from "@/lib/types";
@@ -20,6 +21,7 @@ const OLD_LIMITS_PATH = "/settings#limits";
 /** Icon and colour per notification kind; later designs add one entry each. */
 const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
   spend_limit: { icon: Gauge, color: "#FF6F4F" },
+  duplicate: { icon: Copy, color: "#EDA100" },
 };
 const DEFAULT_STYLE = { icon: Gauge, color: "#8458F5" };
 const kindStyle = (kind: string) => KIND_STYLES[kind] ?? DEFAULT_STYLE;
@@ -42,7 +44,7 @@ export function NotificationDrawer() {
   const panelRef = useRef<HTMLDivElement>(null);
   const { backdropRef, grabProps } = useSheetDrag(panelRef, closeNotifications);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const review = txns.filter((t) => !t.is_parsed).length;
+  const review = txns.filter(needsReview).length;
   /** The notification whose button is being run; one at a time. */
   const [running, setRunning] = useState<string | null>(null);
   /** Error from a button, per notification, shown in its row until the next try. */
@@ -172,8 +174,8 @@ export function NotificationDrawer() {
               <Row
                 icon={TriangleAlert}
                 color="#EDA100"
-                title={`${review} SMS ${review === 1 ? "needs" : "need"} review`}
-                body="Folio couldn't read these automatically. Tap to see them."
+                title={`${review} ${review === 1 ? "item needs" : "items need"} review`}
+                body="SMS Folio couldn't read, and possible duplicates. Tap to see them."
                 onClick={openReview}
               />
             </div>
@@ -292,10 +294,11 @@ function RowText({
       <IconTile icon={icon} color={color} size="sm" />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
-          <span className={cx("text-[15px] text-ink", unread ? "font-semibold" : "font-medium")}>{title}</span>
+          {/* Titles can end in a one-word UPI merchant: wrap it anywhere so the time keeps its room. */}
+          <span className={cx("min-w-0 text-[15px] [overflow-wrap:anywhere] text-ink", unread ? "font-semibold" : "font-medium")}>{title}</span>
           {meta ? <span className="shrink-0 text-xs text-ink-2">{meta}</span> : null}
         </span>
-        <span className="mt-0.5 block text-[13px] leading-snug text-ink-2">{body}</span>
+        <span className="mt-0.5 block text-[13px] leading-snug [overflow-wrap:anywhere] text-ink-2">{body}</span>
       </span>
     </>
   );

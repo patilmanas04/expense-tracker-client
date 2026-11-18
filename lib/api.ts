@@ -151,6 +151,10 @@ export const updateTransaction = (id: string, patch: TransactionPatch) =>
 export const deleteTransaction = (id: string, keepalive = false) =>
   request<void>(`/api/v1/transactions/${id}`, { method: "DELETE", keepalive });
 
+/** "Not a duplicate": the transaction counts again and is never flagged again. 409 when it isn't a pending duplicate. */
+export const markNotDuplicate = (id: string) =>
+  request<Transaction>(`/api/v1/transactions/${id}/not-duplicate`, { method: "POST" });
+
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 
 const PAGE_SIZE = 200; // backend maximum

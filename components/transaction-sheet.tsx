@@ -1,12 +1,12 @@
 "use client";
 
-import { Check, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
-import { carriedForward, parsedByLabel, type Txn } from "@/lib/analytics";
+import { carriedForward, isHeldOut, parsedByLabel, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
-import { dateTimeLabel, formatMoney, monthLabel } from "@/lib/format";
+import { dateTimeLabel, formatMoney, monthLabel, shortDayLabel, timeLabel } from "@/lib/format";
 import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
 import type { TransactionPatch } from "@/lib/types";
 
@@ -53,6 +53,7 @@ function SheetBody({ t }: { t: Txn }) {
   const [draft, setDraft] = useState<Draft | null>(null); // set while editing
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [kept, setKept] = useState(false); // "Not a duplicate" just succeeded
   const editing = draft !== null;
   const editingRef = useRef(false);
   const debit = t.type === "DEBIT";
@@ -116,6 +117,7 @@ function SheetBody({ t }: { t: Txn }) {
   const startEditing = () => {
     setDraft(draftOf(t));
     setError(null);
+    setKept(false); // said once; don't repeat it on the way back from Edit
   };
   const cancelEditing = () => {
     setDraft(null);
@@ -250,6 +252,26 @@ function SheetBody({ t }: { t: Txn }) {
               <p className="mt-2 text-sm text-ink-2">{dateTimeLabel(t.transaction_time)}</p>
             </div>
 
+            {isHeldOut(t) ? (
+              <DuplicateCard
+                t={t}
+                onKept={() => {
+                  // The card (and its focused button) goes away: land on Close instead of <body>, and say it worked.
+                  closeRef.current?.focus();
+                  setKept(true);
+                }}
+              />
+            ) : null}
+            {/* Always mounted, so the message is announced when it appears. */}
+            <div role="status">
+              {kept && !isHeldOut(t) ? (
+                <p className="mb-4 flex items-center gap-1.5 rounded-card bg-income-soft px-4 py-3 text-[13px] font-medium text-income">
+                  <Check size={15} className="shrink-0" aria-hidden />
+                  Not a duplicate: counted again.
+                </p>
+              ) : null}
+            </div>
+
             <dl className="divide-y divide-line rounded-card border border-line/70 bg-surface px-4 shadow-card">
               <Row label="Type">{debit ? "Money out" : "Money in"}</Row>
               <Row label="Category">{categoryName(t)}</Row>
@@ -279,6 +301,78 @@ function SheetBody({ t }: { t: Txn }) {
         )}
       </div>
     </div>
+  );
+}
+
+/** A possible duplicate: what it may duplicate, and the two choices. Held out of every total until one is made. */
+function DuplicateCard({ t, onKept }: { t: Txn; onKept: () => void }) {
+  const { txns, openTransaction, deleteTransaction, markNotDuplicate } = useData();
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // Not loaded (or deleted, waiting for Undo): no link, just the plain line.
+  const original = txns.find((o) => o.id === t.duplicate_of) ?? null;
+  const when = original
+    ? original.day === t.day
+      ? timeLabel(original.transaction_time)
+      : `${shortDayLabel(original.day)}, ${timeLabel(original.transaction_time)}`
+    : "";
+
+  // On success the row comes back with `duplicate_of: null`, so this card goes and the sheet stays open.
+  const keep = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      await markNotDuplicate(t.id);
+      onKept();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <section aria-label="Possible duplicate" className="mb-4 rounded-card border border-warn/30 bg-warn-soft p-4">
+      {original ? (
+        <button
+          type="button"
+          onClick={() => openTransaction(original.id)}
+          className="flex w-full min-w-0 items-center gap-1.5 text-left text-[15px] font-semibold text-warn focus-visible:outline-2 focus-visible:outline-violet"
+        >
+          <span className="min-w-0 break-words">
+            Possible duplicate of {formatMoney(original.minor, original.currency)} at {transactionTitle(original)}, {when}
+          </span>
+          <ChevronRight size={16} className="shrink-0" aria-hidden />
+        </button>
+      ) : (
+        <p className="text-[15px] font-semibold text-warn">Possible duplicate of an earlier transaction</p>
+      )}
+      <p className="mt-1 text-[13px] text-ink-2">It isn&apos;t counted in your totals until you decide.</p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        {/* The usual delete: closes the sheet and offers Undo. */}
+        <button
+          type="button"
+          onClick={() => deleteTransaction(t.id)}
+          disabled={saving}
+          className="h-9 rounded-full bg-ink px-4 text-sm font-semibold text-canvas transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50"
+        >
+          Delete duplicate
+        </button>
+        <button
+          type="button"
+          onClick={() => void keep()}
+          disabled={saving}
+          className="h-9 rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50"
+        >
+          {saving ? "Saving…" : "Not a duplicate"}
+        </button>
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </section>
   );
 }
 

@@ -48,6 +48,7 @@ export function prepare(list: Transaction[]): Txn[] {
       transaction_time: iso,
       created_at: asUtc(t.created_at),
       updated_at: asUtc(t.updated_at ?? t.created_at),
+      duplicate_of: t.duplicate_of ?? null, // an older backend doesn't send it: not held out
       minor: toMinor(t.amount),
       day,
       month: monthOf(day),
@@ -89,15 +90,25 @@ export function latestUpdatedAt(txns: Txn[]): string | null {
   return latest;
 }
 
+/** A possible duplicate you haven't decided on: held out of every total (server: duplicate_flags). */
+export const isHeldOut = (t: Pick<Transaction, "duplicate_of">) => t.duplicate_of != null;
+
+/** Listed under "Needs review": SMS Folio couldn't read, and possible duplicates. */
+export const needsReview = (t: Pick<Transaction, "is_parsed" | "duplicate_of">) => !t.is_parsed || isHeldOut(t);
+
 /** Counts toward Spent (debits) or Income (credits): parsed, in this currency, and not a card bill
  * payment, a transfer between your own accounts or an investment (NOT_COUNTED / INVESTED in
- * categories.ts). Unparsed SMS stay visible for review but never count. */
+ * categories.ts). Unparsed SMS and possible duplicates stay visible for review but never count. */
 export const counts = (t: Txn, currency: string) =>
-  t.is_parsed && t.currency === currency && !NOT_COUNTED.has(categoryName(t)) && !INVESTED.has(categoryName(t));
+  t.is_parsed &&
+  !isHeldOut(t) &&
+  t.currency === currency &&
+  !NOT_COUNTED.has(categoryName(t)) &&
+  !INVESTED.has(categoryName(t));
 
 /** Money put into investments and deposits: "Invested", never Spent. */
 export const isInvested = (t: Txn, currency: string) =>
-  t.is_parsed && t.currency === currency && t.type === "DEBIT" && INVESTED.has(categoryName(t));
+  t.is_parsed && !isHeldOut(t) && t.currency === currency && t.type === "DEBIT" && INVESTED.has(categoryName(t));
 
 export interface TripSummary {
   /** First and last day in the list ("YYYY-MM-DD"). */
@@ -155,7 +166,7 @@ export function monthTotals(txns: Txn[], month: string, currency: string): Month
   for (const t of txns) {
     if (t.month === month) {
       count += 1;
-      if (!t.is_parsed) review += 1;
+      if (needsReview(t)) review += 1;
     }
     // Money counts toward its month (salary paid late in the previous month counts here).
     if (t.countsIn !== month) continue;

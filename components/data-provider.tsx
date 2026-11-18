@@ -24,6 +24,7 @@ import {
   getTransactionsSince,
   clearNotifications as apiClearNotifications,
   dismissNotification as apiDismissNotification,
+  markNotDuplicate as apiMarkNotDuplicate,
   markNotificationsRead as apiMarkNotificationsRead,
   runNotificationAction as apiRunNotificationAction,
   saveBalance as apiSaveBalance,
@@ -95,6 +96,8 @@ interface DataContextValue {
   addTransaction: (input: NewTransaction) => Promise<Txn>;
   /** Edits a transaction; a new category is remembered for the merchant. */
   updateTransaction: (id: string, patch: TransactionPatch) => Promise<Txn>;
+  /** "Not a duplicate": the transaction counts again. Throws ApiError (e.g. 409 when already decided). */
+  markNotDuplicate: (id: string) => Promise<Txn>;
   /** Hides a transaction now and deletes it after `UNDO_MS`, unless undone. */
   deleteTransaction: (id: string) => void;
   /** Brings back the last deleted transaction while its undo window is open. */
@@ -394,6 +397,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [reloadBalance],
   );
 
+  const markNotDuplicate = useCallback(
+    async (id: string) => {
+      try {
+        const updated = await apiMarkNotDuplicate(id);
+        const [txn] = prepare([updated]);
+        setTxns((current) => mergeTransactions(current, [updated]));
+        if (Date.parse(txn.updated_at) > Date.parse(cursorRef.current)) cursorRef.current = txn.updated_at;
+        void reloadBalance(); // it counts in the balance again; limits reload with the transactions
+        return txn;
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) void poll(); // decided elsewhere: show the server's state
+        throw e;
+      }
+    },
+    [reloadBalance, poll],
+  );
+
   // Deleting is instant on screen; the server hears about it after the undo window.
   const commitDelete = useCallback(
     (txn: Txn, keepalive = false) => {
@@ -555,6 +575,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       runNotificationAction,
       addTransaction,
       updateTransaction,
+      markNotDuplicate,
       deleteTransaction,
       undoDelete,
       deletion,
@@ -598,6 +619,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       runNotificationAction,
       addTransaction,
       updateTransaction,
+      markNotDuplicate,
       deleteTransaction,
       undoDelete,
       deletion,

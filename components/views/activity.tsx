@@ -3,7 +3,7 @@
 import { CalendarDays, Check, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { counts, tripSummary, type Txn } from "@/lib/analytics";
+import { counts, needsReview, tripSummary, type Txn } from "@/lib/analytics";
 import { categoryMeta, categoryName } from "@/lib/categories";
 import { dayKey, dayRangeLabel, formatMoney, monthLabel, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
 import { allTags, tagQuery } from "@/lib/tags";
@@ -95,7 +95,7 @@ interface ActiveFilters {
 function matches(t: Txn, f: ActiveFilters, haystack: string) {
   return (
     inPeriod(t, f.period, f.day, f.range, f.today, f.yesterday) &&
-    (f.kind === "ALL" || (f.kind === "REVIEW" ? !t.is_parsed : t.is_parsed && t.type === f.kind)) &&
+    (f.kind === "ALL" || (f.kind === "REVIEW" ? needsReview(t) : t.is_parsed && t.type === f.kind)) &&
     (f.category === ALL || (t.is_parsed && categoryName(t) === f.category)) &&
     (!f.tag || t.tags.includes(f.tag)) &&
     (!f.searchTag || t.tags.includes(f.searchTag)) &&
@@ -192,7 +192,7 @@ export function ActivityView() {
     [txns],
   );
 
-  const reviewCount = useMemo(() => txns.filter((t) => !t.is_parsed).length, [txns]);
+  const reviewCount = useMemo(() => txns.filter(needsReview).length, [txns]);
 
   const filtered = useMemo(
     () => txns.filter((t) => matches(t, filters, searchable.get(t.id) ?? "")),
@@ -527,7 +527,7 @@ export function ActivityView() {
               {txns.length === 0
                 ? "Bank SMS forwarded by your iPhone Shortcut will show up here. Paid in cash? Tap Add."
                 : kind === "REVIEW"
-                  ? "Every SMS so far was read successfully."
+                  ? "No unreadable SMS or possible duplicates."
                   : "Try a different search or filter."}
             </p>
             {filtersActive && txns.length > 0 ? (
