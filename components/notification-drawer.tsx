@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeAlert, BellOff, ChevronRight, Copy, Gauge, TriangleAlert, X, type LucideIcon } from "lucide-react";
+import { BadgeAlert, BellOff, ChevronRight, Copy, Gauge, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -24,6 +24,7 @@ const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
   spend_warning: { icon: Gauge, color: "#F79009" },
   duplicate: { icon: Copy, color: "#EDA100" },
   payment_alert: { icon: BadgeAlert, color: "#F04438" },
+  low_balance: { icon: Wallet, color: "#F04438" },
 };
 const DEFAULT_STYLE = { icon: Gauge, color: "#8458F5" };
 const kindStyle = (kind: string) => KIND_STYLES[kind] ?? DEFAULT_STYLE;

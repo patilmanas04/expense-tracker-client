@@ -7,6 +7,7 @@ import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } f
 import { needsReview } from "@/lib/analytics";
 import { settingError } from "@/lib/api";
 import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, shiftDay, toMinor, weekdayDayLabel } from "@/lib/format";
+import type { Settings } from "@/lib/types";
 
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
@@ -127,7 +128,7 @@ const READ_AT_MAX_MS = 7 * 86_400_000;
 
 /** Bank balance the running "Balance left" starts from. */
 function BalanceSection() {
-  const { balance, saveBalance, clearBalance, today } = useData();
+  const { balance, saveBalance, clearBalance, today, settings, saveSettings } = useData();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   // When you read the balance: "now", or a day ("YYYY-MM-DD", IST) with a time ("HH:MM").
@@ -324,6 +325,20 @@ function BalanceSection() {
               </span>
               <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
             </Link>
+            {settings ? (
+              <AmountSettingRow
+                settingKey="alerts.low_balance"
+                // ?? null: a server from before this setting leaves the key out.
+                saved={settings["alerts.low_balance"] ?? null}
+                save={saveSettings}
+                label="Alert me below"
+                hint="One notification when a payment takes Balance left below this amount."
+                summary="Below"
+                placeholder="10,000"
+                max={LOW_BALANCE_MAX}
+                help={LOW_BALANCE_HELP}
+              />
+            ) : null}
             <div className="flex items-center gap-2 p-3">
               <button type="button" onClick={startEditing} className="h-10 rounded-full bg-violet-soft px-4 text-sm font-semibold text-violet-strong">
                 Update balance
@@ -351,13 +366,15 @@ function BalanceSection() {
 
 const LARGE_AMOUNT_MAX = 10_000_000;
 const LARGE_AMOUNT_HELP = "Enter a whole number of rupees from 1 to 1,00,00,000.";
+const LOW_BALANCE_MAX = 100_000_000;
+const LOW_BALANCE_HELP = "Enter a whole number of rupees from 1 to 10,00,00,000.";
 
-/** "5,000", "₹ 5000" → 5000; null unless a whole number of rupees from 1 to 1,00,00,000. */
-function parseRupees(text: string): number | null {
+/** "5,000", "₹ 5000" → 5000; null unless a whole number of rupees from 1 to max. */
+function parseRupees(text: string, max: number): number | null {
   const cleaned = text.replace(/[₹,\s]/g, "");
-  if (!/^\d{1,8}$/.test(cleaned)) return null;
+  if (!/^\d{1,9}$/.test(cleaned)) return null;
   const rupees = Number(cleaned);
-  return rupees >= 1 && rupees <= LARGE_AMOUNT_MAX ? rupees : null;
+  return rupees >= 1 && rupees <= max ? rupees : null;
 }
 
 /** Payment alerts (notifications in the bell): large payments and payments unusual for the merchant. */
@@ -369,7 +386,17 @@ function AlertsSection() {
       <Card className="divide-y divide-line overflow-hidden">
         {settings ? (
           <>
-            <LargeAmountRow saved={settings["alerts.large_amount"]} save={saveSettings} />
+            <AmountSettingRow
+              settingKey="alerts.large_amount"
+              saved={settings["alerts.large_amount"]}
+              save={saveSettings}
+              label="Payments over"
+              hint="Get a notification for any payment over this amount."
+              summary="Over"
+              placeholder="5,000"
+              max={LARGE_AMOUNT_MAX}
+              help={LARGE_AMOUNT_HELP}
+            />
             <UnusualRow saved={settings["alerts.unusual"]} save={saveSettings} />
           </>
         ) : (
@@ -382,8 +409,29 @@ function AlertsSection() {
 
 type SaveSettings = ReturnType<typeof useData>["saveSettings"];
 
-/** "Payments over ₹X": on asks for the amount first; off saves straight away. */
-function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSettings }) {
+/** A whole-rupee setting ("Payments over ₹X", "Alert me below ₹X"): on asks for the amount first; off saves straight away. */
+function AmountSettingRow({
+  settingKey,
+  saved,
+  save,
+  label,
+  hint,
+  summary,
+  placeholder,
+  max,
+  help,
+}: {
+  settingKey: "alerts.large_amount" | "alerts.low_balance";
+  saved: number | null;
+  save: SaveSettings;
+  label: string;
+  hint: string;
+  /** Before the saved amount: "Over", "Below". */
+  summary: string;
+  placeholder: string;
+  max: number;
+  help: string;
+}) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -409,7 +457,7 @@ function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSetti
     }
     setBusy(true);
     try {
-      await save({ "alerts.large_amount": null });
+      await save({ [settingKey]: null } as Partial<Settings>);
       setEditing(false);
     } catch (err) {
       setError(settingError(err, "Couldn't turn this off."));
@@ -420,15 +468,15 @@ function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSetti
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    const rupees = parseRupees(draft);
+    const rupees = parseRupees(draft, max);
     if (rupees === null) {
-      setError(LARGE_AMOUNT_HELP);
+      setError(help);
       return;
     }
     setBusy(true);
     setError(null);
     try {
-      await save({ "alerts.large_amount": rupees });
+      await save({ [settingKey]: rupees } as Partial<Settings>);
       setEditing(false);
     } catch (err) {
       setError(settingError(err, "Couldn't save the amount."));
@@ -446,10 +494,10 @@ function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSetti
     <div className="p-4">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] text-ink">Payments over</p>
+          <p className="text-[15px] text-ink">{label}</p>
           {saved !== null && !editing ? (
             <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-ink-2">
-              <span>Over {formatMoney(saved * 100, "INR", { decimals: false })}</span>
+              <span>{summary} {formatMoney(saved * 100, "INR", { decimals: false })}</span>
               <button
                 type="button"
                 onClick={() => startEditing(String(saved))}
@@ -459,10 +507,10 @@ function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSetti
               </button>
             </p>
           ) : (
-            <p className="text-[13px] text-ink-2">Get a notification for any payment over this amount.</p>
+            <p className="text-[13px] text-ink-2">{hint}</p>
           )}
         </div>
-        <Switch label="Payments over" checked={editing || saved !== null} onChange={(on) => void toggle(on)} disabled={busy} />
+        <Switch label={label} checked={editing || saved !== null} onChange={(on) => void toggle(on)} disabled={busy} />
       </div>
       {editing ? (
         <form onSubmit={submit} className="mt-3" noValidate>
@@ -479,7 +527,7 @@ function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSetti
               inputMode="numeric"
               autoComplete="off"
               enterKeyHint="done"
-              placeholder="5,000"
+              placeholder={placeholder}
               // Opened by the switch or "Change": the amount is what's wanted next.
               autoFocus
               value={draft}

@@ -265,4 +265,6 @@ export interface Settings {
   "alerts.unusual": boolean;
   /** Warn once when a spend limit is this full: 50–95 in steps of 5; null = Off. Default 80. */
   "limits.warn_percent": number | null;
+  /** Whole rupees: one notification when a payment takes Balance left below this; null = Off (default). */
+  "alerts.low_balance": number | null;
 }
