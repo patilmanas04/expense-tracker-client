@@ -3,7 +3,7 @@
 import { CalendarDays, Check, Download, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { counts, groupByDay, needsReview, tripSummary, type Txn } from "@/lib/analytics";
+import { counts, groupByDay, monthTitle, needsReview, tripSummary, type MonthCalendar, type Txn } from "@/lib/analytics";
 import { categoryMeta, categoryName } from "@/lib/categories";
 import { transactionsCsv } from "@/lib/csv";
 import { fileName, type ExportFilters } from "@/lib/csv-format";
@@ -11,8 +11,6 @@ import {
   dayKey,
   dayRangeLabel,
   formatMoney,
-  monthLabel,
-  monthOf,
   parseAmountInput,
   shiftMonth,
   shortDayLabel,
@@ -54,7 +52,7 @@ function inPeriod(t: Txn, period: string, day: string, range: DayRange, today: s
     case RANGE:
       return (!range.from || t.day >= range.from) && (!range.to || t.day <= range.to);
     default:
-      return t.month === period;
+      return t.period === period;
   }
 }
 
@@ -77,19 +75,19 @@ function exportPeriod(period: string, day: string, range: DayRange, today: strin
 }
 
 /**
- * The calendar's month: a month period's own month; a picked day's month (today's until one is picked); a
- * range's start month (else its end's, else today's); the current month for All time, Today and Yesterday.
+ * The calendar's month (or pay period): a month period's own month; a picked day's month (today's until one is
+ * picked); a range's start month (else its end's, else today's); the current month for All time, Today and Yesterday.
  */
-function calendarMonthFor(period: string, day: string, range: DayRange, today: string): string {
+function calendarMonthFor(period: string, day: string, range: DayRange, today: string, cal: MonthCalendar): string {
   switch (period) {
     case ALL:
     case TODAY:
     case YESTERDAY:
-      return monthOf(today);
+      return cal.current;
     case ON_DAY:
-      return monthOf(day || today);
+      return cal.monthOf(day || today);
     case RANGE:
-      return monthOf(range.from ?? range.to ?? today);
+      return cal.monthOf(range.from ?? range.to ?? today);
     default:
       return period;
   }
@@ -209,7 +207,7 @@ function amountLabel(f: AmountFilter, currency: string) {
 }
 
 export function ActivityView() {
-  const { txns, months, currency, today, activityRequest } = useData();
+  const { txns, months, currency, today, cal, activityRequest } = useData();
   const [query, setQuery] = useState("");
   const [kind, setKind] = useState<KindFilter>("ALL");
   const [category, setCategory] = useState(ALL);
@@ -292,15 +290,14 @@ export function ActivityView() {
   );
 
   const view = useSyncExternalStore(subscribeView, readView, () => "list" as View);
-  const calMonth = today ? calendarMonthFor(period, day, range, today) : "";
-  // doc 14 switches t.month to t.period here.
+  const calMonth = today ? calendarMonthFor(period, day, range, today, cal) : "";
   const calDays = useMemo(
-    () => (view === "calendar" && calMonth ? groupByDay(filteredExceptPeriod.filter((t) => t.month === calMonth), currency) : []),
+    () => (view === "calendar" && calMonth ? groupByDay(filteredExceptPeriod.filter((t) => t.period === calMonth), currency) : []),
     [view, calMonth, filteredExceptPeriod, currency],
   );
   const oldestMonth = months[months.length - 1] ?? calMonth;
   const canPrev = !!calMonth && calMonth > oldestMonth;
-  const canNext = !!today && calMonth < monthOf(today);
+  const canNext = !!today && calMonth < cal.current;
   // An arrow can land on a month with no data; the Period menu still lists it then.
   const monthOptions = /^\d{4}-\d{2}$/.test(period) && !months.includes(period) ? [...months, period].sort().reverse() : months;
 
@@ -531,7 +528,7 @@ export function ActivityView() {
             { value: YESTERDAY, label: "Yesterday" },
             { value: ON_DAY, label: period === ON_DAY && day ? `On ${shortDayLabel(day)}` : "Pick a date…" },
             { value: RANGE, label: period === RANGE ? rangeLabel(range) : "Date range…" },
-            ...monthOptions.map((m) => ({ value: m, label: monthLabel(m) })),
+            ...monthOptions.map((m) => ({ value: m, label: monthTitle(cal, m) })),
           ]}
         />
         {/* The date for "Pick a date". Always in the page so the menu can open its picker. */}
@@ -642,7 +639,9 @@ export function ActivityView() {
       {view === "calendar" ? (
         calMonth ? (
           <CalendarGrid
-            month={calMonth}
+            first={cal.first(calMonth)}
+            last={cal.last(calMonth)}
+            label={monthTitle(cal, calMonth)}
             days={calDays}
             today={today}
             currency={currency}

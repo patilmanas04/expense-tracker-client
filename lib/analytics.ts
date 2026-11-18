@@ -3,36 +3,51 @@ import {
   dayKey,
   dayOfMonth,
   daySpan,
-  daysInMonth,
   formatPercent,
+  monthLabel,
   monthName,
   monthOf,
   monthShortName,
+  periodLabel,
+  shiftDay,
   shiftMonth,
   toMinor,
 } from "./format";
+import { monthCalendar, type MonthCalendar } from "./periods";
 import { tagsOf } from "./tags";
 import { summarizeTrend, type TrendSummary } from "./trend";
 import type { Transaction, TxType } from "./types";
 
 export type { TrendSummary } from "./trend";
+export { monthCalendar, type MonthCalendar };
 
 /** A transaction with precomputed IST day/month and an integer amount in paise. */
 export interface Txn extends Transaction {
   minor: number;
   day: string;
   month: string;
+  /**
+   * The month this row is listed under (month filters, row counts, month list): its calendar month, or its pay
+   * period with "Month starts on payday" on.
+   */
+  period: string;
   time: number;
-  /** The month this counts toward in totals: its own, or the next for salary paid late in the month. */
+  /**
+   * The month this counts toward in totals: its own, or the next for salary paid late in the month. With pay
+   * periods on, the same as `period`.
+   */
   countsIn: string;
-  /** Its day within `countsIn`: the 1st when carried forward. For same-days comparisons and daily charts. */
+  /**
+   * Its day within `countsIn`: the 1st when carried forward. With pay periods on, its day within the period (can
+   * exceed 31). For same-days comparisons and daily charts.
+   */
   countsDay: number;
   /** Tags in the note (lib/tags.ts), computed once in prepare(). */
   tags: string[];
 }
 
-/** Salary paid on the 16th or later is mostly money for the next month, so it counts there. */
-export const carriedForward = (t: Pick<Txn, "countsIn" | "month">) => t.countsIn !== t.month;
+/** Salary paid on the 16th or later is mostly money for the next month, so it counts there. Never with pay periods on. */
+export const carriedForward = (t: Pick<Txn, "countsIn" | "period">) => t.countsIn !== t.period;
 
 // The backend stores UTC; some drivers serialise it without an offset.
 const asUtc = (iso: string) => (/(?:[zZ]|[+-]\d\d:?\d\d)$/.test(iso) ? iso : `${iso}Z`);
@@ -56,6 +71,7 @@ export function prepare(list: Transaction[]): Txn[] {
       minor: toMinor(t.amount),
       day,
       month: monthOf(day),
+      period: monthOf(day),
       time: Date.parse(iso),
       countsIn: carried ? shiftMonth(monthOf(day), 1) : monthOf(day),
       countsDay: carried ? 1 : dayOfMonth(day),
@@ -63,6 +79,35 @@ export function prepare(list: Transaction[]): Txn[] {
     });
   }
   return out.sort((a, b) => b.time - a.time);
+}
+
+/**
+ * Pay periods applied: `period`, `countsIn` and `countsDay` from the calendar. Off: the same array. A row whose
+ * three fields already match keeps its object.
+ */
+export function applyPeriods(txns: Txn[], cal: MonthCalendar): Txn[] {
+  if (!cal.payday) return txns;
+  return txns.map((t) => {
+    const period = cal.monthOf(t.day);
+    const countsDay = cal.dayIndex(t.day);
+    return t.period === period && t.countsIn === period && t.countsDay === countsDay
+      ? t
+      : { ...t, period, countsIn: period, countsDay };
+  });
+}
+
+/**
+ * Month picker / heading text: "October 2026" off; with pay periods on "Nov · 31 Oct – today" (the current one)
+ * or "Oct · 30 Sept – 30 Oct", with the year when it isn't the current month's ("Dec 2025 · 30 Nov – 30 Dec").
+ */
+export function monthTitle(cal: MonthCalendar, month: string): string {
+  if (!cal.payday) return monthLabel(month);
+  return periodLabel(
+    month,
+    cal.first(month),
+    month === cal.current ? null : cal.last(month),
+    month.slice(0, 4) !== cal.current.slice(0, 4),
+  );
 }
 
 /**
@@ -157,10 +202,13 @@ export function tripSummary(list: Txn[], currency: string): TripSummary | null {
 
 const sum = (list: Txn[]) => list.reduce((total, t) => total + t.minor, 0);
 
-/** Month to compare against: the same days of the previous month while a month is in progress. */
-function comparisonWindow(month: string, today: string) {
-  const isCurrent = monthOf(today) === month;
-  return { isCurrent, cutoff: isCurrent ? dayOfMonth(today) : 31, previous: shiftMonth(month, -1) };
+/**
+ * Month to compare against: the same days of the previous month (or pay period) while a month is in progress.
+ * A previous period shorter than the days gone counts in full.
+ */
+function comparisonWindow(month: string, today: string, cal: MonthCalendar) {
+  const isCurrent = cal.current === month;
+  return { isCurrent, cutoff: isCurrent ? cal.dayIndex(today) : Infinity, previous: shiftMonth(month, -1) };
 }
 
 export interface MonthTotals {
@@ -179,7 +227,7 @@ export function monthTotals(txns: Txn[], month: string, currency: string): Month
   let count = 0;
   let review = 0;
   for (const t of txns) {
-    if (t.month === month) {
+    if (t.period === month) {
       count += 1;
       if (needsReview(t)) review += 1;
     }
@@ -211,9 +259,10 @@ export function compareWithPrevious(
   month: string,
   currency: string,
   today: string,
+  cal: MonthCalendar,
   type: TxType = "DEBIT",
 ): Comparison {
-  const { isCurrent, cutoff, previous } = comparisonWindow(month, today);
+  const { isCurrent, cutoff, previous } = comparisonWindow(month, today, cal);
   const pick = (m: string) =>
     txns.filter((t) => t.countsIn === m && t.type === type && counts(t, currency) && t.countsDay <= cutoff);
   const current = sum(pick(month));
@@ -244,8 +293,9 @@ export function categoryBreakdown(
   currency: string,
   type: TxType,
   today: string,
+  cal: MonthCalendar,
 ): CategoryStat[] {
-  const { cutoff, previous } = comparisonWindow(month, today);
+  const { cutoff, previous } = comparisonWindow(month, today, cal);
   const current = new Map<string, { minor: number; count: number }>();
   const prev = new Map<string, number>();
   for (const t of txns) {
@@ -283,13 +333,13 @@ export interface DayPoint {
   expense: number;
 }
 
-/** One point per day of the month, up to today for the month in progress. */
-export function dailySeries(txns: Txn[], month: string, currency: string, today: string): DayPoint[] {
-  const last = monthOf(today) === month ? dayOfMonth(today) : daysInMonth(month);
-  const points: DayPoint[] = Array.from({ length: last }, (_, i) => {
-    const day = `${month}-${String(i + 1).padStart(2, "0")}`;
-    return { day, label: String(i + 1), income: 0, expense: 0 };
-  });
+/** One point per day of the month (or pay period), up to today for the month in progress; labelled with the day of the month. */
+export function dailySeries(txns: Txn[], month: string, currency: string, today: string, cal: MonthCalendar): DayPoint[] {
+  const last = month === cal.current ? today : cal.last(month);
+  const points: DayPoint[] = [];
+  for (let day = cal.first(month); day <= last; day = shiftDay(day, 1)) {
+    points.push({ day, label: String(dayOfMonth(day)), income: 0, expense: 0 });
+  }
   for (const t of txns) {
     if (t.countsIn !== month || !counts(t, currency)) continue;
     const point = points[t.countsDay - 1]; // carried-forward salary lands on the 1st
@@ -324,18 +374,24 @@ export function monthlyTrend(txns: Txn[], endMonth: string, currency: string, mo
 
 /**
  * Trend stats for one category's or merchant's rows: `points` from monthlyTrend(rows, endMonth, currency, n).
- * Sums counted DEBITs by countsIn with countsDay <= today's day (doc 15 switches the sums to t.counted;
- * doc 14 changes countsIn/countsDay to pay periods).
+ * Sums counted DEBITs by countsIn with countsDay <= today's day within its month, `cal.dayIndex(today)` (doc 15
+ * switches the sums to t.counted). With pay periods on, countsIn/countsDay are already the periods' (applyPeriods).
  */
-export function trendStats(points: MonthPoint[], rows: Txn[], currency: string, today: string): TrendSummary<MonthPoint> {
-  const day = dayOfMonth(today);
+export function trendStats(
+  points: MonthPoint[],
+  rows: Txn[],
+  currency: string,
+  today: string,
+  cal: MonthCalendar,
+): TrendSummary<MonthPoint> {
+  const day = cal.dayIndex(today);
   const months = new Set(points.map((p) => p.month));
   const upToDay: Record<string, number> = {};
   for (const t of rows) {
     if (t.type !== "DEBIT" || !months.has(t.countsIn) || t.countsDay > day || !counts(t, currency)) continue;
     upToDay[t.countsIn] = (upToDay[t.countsIn] ?? 0) + t.minor;
   }
-  return summarizeTrend(points, monthOf(today), upToDay);
+  return summarizeTrend(points, cal.current, upToDay);
 }
 
 export interface TrendMerchant {
@@ -448,16 +504,16 @@ export interface Pace {
   previousMonth: string;
 }
 
-/** Month-in-progress spending projected to month end, against last month's total. */
-export function spendingPace(txns: Txn[], month: string, currency: string, today: string): Pace | null {
-  if (monthOf(today) !== month) return null;
+/** Month-in-progress spending projected to month (or pay period) end, against last month's total. */
+export function spendingPace(txns: Txn[], month: string, currency: string, today: string, cal: MonthCalendar): Pace | null {
+  if (cal.current !== month) return null;
   const previousMonth = shiftMonth(month, -1);
-  const expense = (m: string) => sum(txns.filter((t) => t.month === m && t.type === "DEBIT" && counts(t, currency)));
+  const expense = (m: string) => sum(txns.filter((t) => t.countsIn === m && t.type === "DEBIT" && counts(t, currency)));
   const lastMonthTotal = expense(previousMonth);
   if (lastMonthTotal <= 0) return null;
   const spent = expense(month);
-  const day = dayOfMonth(today);
-  const days = daysInMonth(month);
+  const day = cal.dayIndex(today);
+  const days = cal.dayIndex(cal.last(month));
   return { spent, lastMonthTotal, projected: Math.round((spent / day) * days), day, days, previousMonth };
 }
 
@@ -485,8 +541,8 @@ export interface Insight {
   tone: "good" | "bad" | "neutral";
 }
 
-export function buildInsight(txns: Txn[], month: string, currency: string, today: string): Insight | null {
-  const comparison = compareWithPrevious(txns, month, currency, today);
+export function buildInsight(txns: Txn[], month: string, currency: string, today: string, cal: MonthCalendar): Insight | null {
+  const comparison = compareWithPrevious(txns, month, currency, today, cal);
   if (comparison.hasPrevious && comparison.previous > 0) {
     const change = comparison.delta / comparison.previous;
     if (Math.abs(change) >= 0.05) {
@@ -497,7 +553,7 @@ export function buildInsight(txns: Txn[], month: string, currency: string, today
       };
     }
   }
-  const [top] = categoryBreakdown(txns, month, currency, "DEBIT", today);
+  const [top] = categoryBreakdown(txns, month, currency, "DEBIT", today, cal);
   if (top && top.share < 1) {
     return { text: `${top.name} is ${formatPercent(top.share)} of your spending`, tone: "neutral" };
   }
@@ -529,9 +585,9 @@ export function groupByDay(list: Txn[], currency: string): DayGroup[] {
   return groups;
 }
 
-/** Months that have data, newest first, always including the current month. */
+/** Months that have data (by `period`), newest first, always including the current month (`cal.current`). */
 export function availableMonths(txns: Txn[], currentMonth: string): string[] {
-  return [...new Set([currentMonth, ...txns.map((t) => t.month)])].sort().reverse();
+  return [...new Set([currentMonth, ...txns.map((t) => t.period)])].sort().reverse();
 }
 
 /** INR when present, otherwise the most used currency. */

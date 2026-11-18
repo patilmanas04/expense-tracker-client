@@ -9,11 +9,12 @@ import {
   buildInsight,
   categoryBreakdown,
   compareWithPrevious,
+  monthTitle,
   monthTotals,
   spendingPace,
 } from "@/lib/analytics";
 import { PALETTE, categoryMeta } from "@/lib/categories";
-import { formatMoney, formatPercent, monthLabel, monthName } from "@/lib/format";
+import { formatMoney, formatPercent, monthName, shortDayLabel } from "@/lib/format";
 
 import { Donut } from "../charts/donut";
 import { useData } from "../data-provider";
@@ -24,15 +25,18 @@ import { Amount, Avatar, Card, IconButton, IconTile, InfoTip, SectionHeader, Sel
 const RECENT_LIMIT = 8;
 
 export function HomeView() {
-  const { txns, month, setMonth, months, currency, today, user, requestActivity, inbox, openNotifications } = useData();
+  const { txns, month, setMonth, months, currency, today, cal, user, requestActivity, inbox, openNotifications } = useData();
   const router = useRouter();
 
   const totals = useMemo(() => monthTotals(txns, month, currency), [txns, month, currency]);
-  const comparison = useMemo(() => compareWithPrevious(txns, month, currency, today), [txns, month, currency, today]);
-  const insight = useMemo(() => buildInsight(txns, month, currency, today), [txns, month, currency, today]);
-  const categories = useMemo(() => categoryBreakdown(txns, month, currency, "DEBIT", today), [txns, month, currency, today]);
-  const pace = useMemo(() => spendingPace(txns, month, currency, today), [txns, month, currency, today]);
-  const monthTxns = useMemo(() => txns.filter((t) => t.month === month), [txns, month]);
+  const comparison = useMemo(() => compareWithPrevious(txns, month, currency, today, cal), [txns, month, currency, today, cal]);
+  const insight = useMemo(() => buildInsight(txns, month, currency, today, cal), [txns, month, currency, today, cal]);
+  const categories = useMemo(
+    () => categoryBreakdown(txns, month, currency, "DEBIT", today, cal),
+    [txns, month, currency, today, cal],
+  );
+  const pace = useMemo(() => spendingPace(txns, month, currency, today, cal), [txns, month, currency, today, cal]);
+  const monthTxns = useMemo(() => txns.filter((t) => t.period === month), [txns, month]);
 
   const openActivity = (request: Parameters<typeof requestActivity>[0]) => {
     requestActivity(request);
@@ -47,6 +51,11 @@ export function HomeView() {
       : `${formatMoney(Math.abs(comparison.delta), currency, { decimals: false })} ${comparison.delta < 0 ? "less" : "more"} than ${
           comparison.isCurrent ? "last month" : previousName
         }`;
+  const incomeInfo = cal.payday
+    ? `Money that came into your accounts in ${monthName(month)} (${shortDayLabel(cal.first(month))} – ${
+        month === cal.current ? "today" : shortDayLabel(cal.last(month))
+      }): salary, refunds, cashback, transfers from other people and other income. Card bill payments, transfers between your own accounts and money back from investments aren't counted. A month starts on the day your salary arrives. SMS Folio couldn't read aren't counted.`
+    : `Money that came into your accounts in ${monthName(month)}: refunds, cashback, transfers from other people and other income. Card bill payments, transfers between your own accounts and money back from investments aren't counted. Salary paid on the 16th or later counts toward the next month, the one it pays for. SMS Folio couldn't read aren't counted.`;
 
   return (
     <div className="mx-auto max-w-6xl lg:px-8 lg:pt-8">
@@ -63,7 +72,7 @@ export function HomeView() {
                 label="Month"
                 value={month}
                 onChange={setMonth}
-                options={months.map((m) => ({ value: m, label: monthLabel(m) }))}
+                options={months.map((m) => ({ value: m, label: monthTitle(cal, m) }))}
               />
               <button
                 type="button"
@@ -113,7 +122,7 @@ export function HomeView() {
                 label="Income"
                 minor={totals.income}
                 currency={currency}
-                info={`Money that came into your accounts in ${monthName(month)}: refunds, cashback, transfers from other people and other income. Card bill payments, transfers between your own accounts and money back from investments aren't counted. Salary paid on the 16th or later counts toward the next month, the one it pays for. SMS Folio couldn't read aren't counted.`}
+                info={incomeInfo}
               />
               <MoneyCard
                 icon={Wallet}

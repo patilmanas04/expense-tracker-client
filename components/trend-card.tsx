@@ -3,9 +3,17 @@
 import { TrendingUp } from "lucide-react";
 import { useMemo, useState } from "react";
 
-import { categoryBreakdown, monthlyTrend, trendCategories, trendMerchants, trendStats, type Txn } from "@/lib/analytics";
+import {
+  categoryBreakdown,
+  monthlyTrend,
+  trendCategories,
+  trendMerchants,
+  trendStats,
+  type MonthCalendar,
+  type Txn,
+} from "@/lib/analytics";
 import { PALETTE, categoryName } from "@/lib/categories";
-import { dayOfMonth, formatMoney, formatPercent, monthShortName, shiftMonth } from "@/lib/format";
+import { formatMoney, formatPercent, monthShortName, shiftMonth } from "@/lib/format";
 
 import { TrendBars } from "./charts/bars";
 import { Card, IconTile, Segmented, SelectPill } from "./ui";
@@ -15,7 +23,19 @@ import { Card, IconTile, Segmented, SelectPill } from "./ui";
  * month, with the average over complete months and, for the month in progress, how it's going so far.
  * Spending only, under Expenses and Income alike. Nothing shows when the window has no counted spending.
  */
-export function TrendCard({ txns, month, currency, today }: { txns: Txn[]; month: string; currency: string; today: string }) {
+export function TrendCard({
+  txns,
+  month,
+  currency,
+  today,
+  cal,
+}: {
+  txns: Txn[];
+  month: string;
+  currency: string;
+  today: string;
+  cal: MonthCalendar;
+}) {
   const [picked, setPicked] = useState<string | null>(null);
   const [merchant, setMerchant] = useState<string | null>(null); // a merchant key
   const [span, setSpan] = useState<"6" | "12">("6");
@@ -25,8 +45,8 @@ export function TrendCard({ txns, month, currency, today }: { txns: Txn[]; month
 
   const categories = useMemo(() => (ready ? trendCategories(txns, from, month, currency) : []), [ready, txns, from, month, currency]);
   const monthTop = useMemo(
-    () => (ready ? categoryBreakdown(txns, month, currency, "DEBIT", today)[0]?.name : undefined),
-    [ready, txns, month, currency, today],
+    () => (ready ? categoryBreakdown(txns, month, currency, "DEBIT", today, cal)[0]?.name : undefined),
+    [ready, txns, month, currency, today, cal],
   );
   // A pick that isn't an option any more (another month or window) falls back to the default.
   const has = (name: string | null | undefined) => !!name && categories.some((c) => c.name === name);
@@ -44,8 +64,8 @@ export function TrendCard({ txns, month, currency, today }: { txns: Txn[]; month
   const stats = useMemo(() => {
     if (!ready || !category) return null;
     const points = monthlyTrend(rows, month, currency, n);
-    return trendStats(points, rows, currency, today);
-  }, [ready, category, rows, month, currency, n, today]);
+    return trendStats(points, rows, currency, today, cal);
+  }, [ready, category, rows, month, currency, n, today, cal]);
   const categoryOptions = useMemo(
     () => [...categories].sort((a, b) => a.name.localeCompare(b.name)).map((c) => ({ value: c.name, label: c.name })),
     [categories],
@@ -123,7 +143,7 @@ export function TrendCard({ txns, month, currency, today }: { txns: Txn[]; month
             {current.usualSoFar !== null ? (
               <>
                 {" · "}
-                {money(current.usualSoFar)} on average by day {dayOfMonth(today)}
+                {money(current.usualSoFar)} on average by day {cal.dayIndex(today)}
               </>
             ) : null}
             {current.change !== null ? ` (${sign}${formatPercent(Math.abs(current.change))})` : null}

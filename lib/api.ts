@@ -13,6 +13,7 @@ import type {
   MerchantPreview,
   NameSaved,
   NewTransaction,
+  PayPeriods,
   RecurringDecision,
   RecurringSummary,
   RulePreview,
@@ -184,6 +185,9 @@ export const saveSettings = (changes: Partial<Settings>) =>
 /** A settings 422 without its "<key>: " prefix, or `fallback` for anything that isn't an Error. */
 export const settingError = (err: unknown, fallback: string) =>
   err instanceof Error ? err.message.replace(/^[a-z0-9_.]+: /, "") : fallback;
+
+/** Pay periods ("Month starts on payday"), oldest first; `enabled` false and [] while the setting is off. */
+export const getPeriods = () => request<PayPeriods>("/api/v1/periods");
 
 /** Merged names, newest first. */
 export const getMerchantNames = () => request<MerchantName[]>("/api/v1/merchant-names");

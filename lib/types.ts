@@ -305,4 +305,19 @@ export interface Settings {
   "limits.warn_percent": number | null;
   /** Whole rupees: one notification when a payment takes Balance left below this; null = Off (default). */
   "alerts.low_balance": number | null;
+  /** Months start on payday (pay_periods.py); default false. */
+  "periods.payday": boolean;
+}
+
+/** One pay period (server: pay_periods.PayPeriodOut). IST "YYYY-MM-DD"; `end` inclusive (the newest one's is its latest end). */
+export interface PayPeriod {
+  month: string;
+  start: string;
+  end: string;
+}
+
+/** GET /api/v1/periods. Off: enabled false, []. On with no salary: enabled true, []. */
+export interface PayPeriods {
+  enabled: boolean;
+  periods: PayPeriod[];
 }

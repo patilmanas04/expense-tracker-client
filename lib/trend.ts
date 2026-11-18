@@ -16,7 +16,7 @@ export interface TrendSummary<P extends TrendPoint> {
   /** Set only when the last shown month is the month in progress. */
   current: {
     month: string;
-    /** This month's spending up to today's day (countsDay <= day). */
+    /** This month's spending up to today's day within it (countsDay <= day). */
     soFar: number;
     /** Mean over the same complete months of their spending up to the same day; null with no complete month. */
     usualSoFar: number | null;
@@ -26,8 +26,9 @@ export interface TrendSummary<P extends TrendPoint> {
 }
 
 /**
- * `upToDay[month]` = that month's counted spending with countsDay <= today's day (missing = 0).
- * `currentMonth` is monthOf(today); months >= it are never "complete".
+ * `upToDay[month]` = that month's counted spending with countsDay <= today's day within its month
+ * (`cal.dayIndex(today)`; missing = 0).
+ * `currentMonth` is the month in progress (`cal.current`); months >= it are never "complete".
  */
 export function summarizeTrend<P extends TrendPoint>(
   points: P[],

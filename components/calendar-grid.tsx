@@ -4,8 +4,8 @@ import { ChevronLeft, ChevronRight } from "lucide-react";
 import { useMemo } from "react";
 
 import { needsReview, type DayGroup } from "@/lib/analytics";
-import { SHADE_PERCENT, calendarCells, shadeStep } from "@/lib/calendar";
-import { compactMoney, dayOfMonth, formatMoney, monthLabel, weekdayDayLabel } from "@/lib/format";
+import { SHADE_PERCENT, calendarCellsBetween, shadeStep } from "@/lib/calendar";
+import { compactMoney, dayOfMonth, formatMoney, shortDayLabel, weekdayDayLabel } from "@/lib/format";
 
 import { Card, IconButton, cx } from "./ui";
 
@@ -14,11 +14,14 @@ const WEEKDAYS = ["M", "T", "W", "T", "F", "S", "S"];
 const COMPACT_FROM = 1_000_000;
 
 /**
- * Activity → Calendar: one month, Monday-first, each day's spending shaded in 4 steps against the
- * month's largest day. Days up to today are buttons that list that day; later days are muted.
+ * Activity → Calendar: one month or one pay period (`first`…`last`), Monday-first, each day's spending shaded in
+ * 4 steps against the month's largest day. Days up to today are buttons that list that day; later days are muted.
+ * A pay period that crosses into another month shows "1 Nov" on that month's 1st.
  */
 export function CalendarGrid({
-  month,
+  first,
+  last,
+  label,
   days,
   today,
   currency,
@@ -28,7 +31,9 @@ export function CalendarGrid({
   onPickDay,
   onMonth,
 }: {
-  month: string; // "YYYY-MM"
+  first: string; // "YYYY-MM-DD", the month's (or pay period's) first day
+  last: string; // its last day (the open pay period's expected last day)
+  label: string; // "October 2026", or "Nov · 31 Oct – today" (monthTitle)
   days: DayGroup[]; // groupByDay over the month's rows
   today: string; // "YYYY-MM-DD"
   currency: string;
@@ -38,12 +43,13 @@ export function CalendarGrid({
   onPickDay: (day: string) => void;
   onMonth: (delta: -1 | 1) => void;
 }) {
-  const cells = useMemo(() => calendarCells(month), [month]);
+  const cells = useMemo(() => calendarCellsBetween(first, last), [first, last]);
+  const spans = first.slice(0, 7) !== last.slice(0, 7);
+  const dayText = (day: string) => (spans && dayOfMonth(day) === 1 ? shortDayLabel(day) : dayOfMonth(day));
   const byDay = useMemo(() => new Map(days.map((d) => [d.day, d])), [days]);
   const max = days.reduce((m, d) => Math.max(m, d.spent), 0);
   const totalSpent = days.reduce((s, d) => s + d.spent, 0);
   const count = days.reduce((s, d) => s + d.items.length, 0);
-  const label = monthLabel(month);
   const whole = (minor: number) => formatMoney(minor, currency, { decimals: false });
 
   return (
@@ -93,9 +99,9 @@ export function CalendarGrid({
               <div
                 key={day}
                 aria-hidden
-                className="flex min-h-14 min-w-0 rounded-xl px-0.5 py-1 text-[12px] font-medium text-ink-3 sm:min-h-20 sm:p-2 sm:text-[13px]"
+                className="flex min-h-14 min-w-0 rounded-xl px-0.5 py-1 text-[12px] font-medium whitespace-nowrap text-ink-3 sm:min-h-20 sm:p-2 sm:text-[13px]"
               >
-                {dayOfMonth(day)}
+                {dayText(day)}
               </div>
             );
           }
@@ -130,7 +136,7 @@ export function CalendarGrid({
                 step ? { backgroundColor: `color-mix(in srgb, var(--color-violet) ${SHADE_PERCENT[step]}%, transparent)` } : undefined
               }
             >
-              <span className="text-[12px] font-medium sm:text-[13px]">{dayOfMonth(day)}</span>
+              <span className="text-[12px] font-medium whitespace-nowrap sm:text-[13px]">{dayText(day)}</span>
               {items ? (
                 <span className="w-full min-w-0">
                   <span className="block w-full truncate text-[10px] font-semibold tabular-nums sm:text-[13px]">

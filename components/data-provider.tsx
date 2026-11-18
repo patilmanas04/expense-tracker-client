@@ -3,12 +3,15 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 
 import {
+  applyPeriods,
   availableMonths,
   currencies as listCurrencies,
   latestUpdatedAt,
   mergeTransactions,
+  monthCalendar,
   preferredCurrency,
   prepare,
+  type MonthCalendar,
   type Txn,
 } from "@/lib/analytics";
 import {
@@ -22,6 +25,7 @@ import {
   getLimits,
   getMe,
   getNotifications,
+  getPeriods,
   getRecurring,
   getSettings,
   getTransactionsSince,
@@ -38,7 +42,7 @@ import {
   signOut as apiSignOut,
   updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
-import { dayKey, monthOf } from "@/lib/format";
+import { dayKey } from "@/lib/format";
 import type {
   Balance,
   Cadence,
@@ -47,6 +51,7 @@ import type {
   LimitsSummary,
   MerchantLimitInput,
   NewTransaction,
+  PayPeriods,
   RecurringDecision,
   RecurringSummary,
   Settings,
@@ -117,6 +122,15 @@ interface DataContextValue {
   settings: Settings | null;
   /** Changes only the keys given. Throws ApiError; a 422 message names the key ("<key>: <message>"). */
   saveSettings: (changes: Partial<Settings>) => Promise<Settings>;
+  /** How months are cut: calendar months, or pay periods with "Month starts on payday" on. */
+  cal: MonthCalendar;
+  /** Pay periods as last loaded; null until then. */
+  periods: PayPeriods | null;
+  /**
+   * Saves "Month starts on payday", then reloads periods and limits and selects the new current month. Throws
+   * ApiError when the save fails.
+   */
+  setPayday: (on: boolean) => Promise<void>;
   /** In-app notifications (bell on Home). */
   inbox: Inbox;
   notificationsOpen: boolean;
@@ -198,21 +212,30 @@ function withoutHidden(inbox: Inbox, hidden: Set<string>): Inbox {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 type LoadResult =
-  | { kind: "ok"; user: User; txns: Txn[]; balance: Balance | null; inbox: Inbox; settings: Settings | null }
+  | {
+      kind: "ok";
+      user: User;
+      txns: Txn[];
+      balance: Balance | null;
+      inbox: Inbox;
+      settings: Settings | null;
+      periods: PayPeriods | null;
+    }
   | { kind: "signed-out" }
   | { kind: "error"; message: string };
 
 async function fetchEverything(): Promise<LoadResult> {
   try {
     const user = await getMe();
-    const [list, balance, inbox, settings] = await Promise.all([
+    const [list, balance, inbox, settings, periods] = await Promise.all([
       getAllTransactions(),
-      // The balance, notifications and settings are optional; never let them block the dashboard.
+      // The balance, notifications, settings and pay periods are optional; never let them block the dashboard.
       getBalance().catch(() => null),
       getNotifications().catch(() => EMPTY_INBOX),
       getSettings().catch(() => null),
+      getPeriods().catch(() => null),
     ]);
-    return { kind: "ok", user, txns: prepare(list), balance, inbox, settings };
+    return { kind: "ok", user, txns: prepare(list), balance, inbox, settings, periods };
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return { kind: "signed-out" };
     return { kind: "error", message: e instanceof Error ? e.message : "Something went wrong." };
@@ -235,6 +258,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const hiddenNotes = useRef(new Set<string>()); // swiped away or cleared; a poll in flight can't bring them back
   const [limits, setLimits] = useState<LimitsSummary | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null); // not polled; reloads with Sync
+  const [periods, setPeriods] = useState<PayPeriods | null>(null); // null = never loaded: calendar months
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringFailed, setRecurringFailed] = useState(false);
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
@@ -259,8 +283,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setInbox(withoutHidden(result.inbox, hiddenNotes.current));
       // A failed settings load keeps the last value.
       setSettings((current) => (!result.settings || same(current, result.settings) ? current : result.settings));
+      // Likewise pay periods: a failed load keeps the last list (none at all means calendar months).
+      setPeriods((current) => (!result.periods || same(current, result.periods) ? current : result.periods));
       setToday(now);
-      setMonth((m) => m || monthOf(now));
+      setMonth((m) => m || monthCalendar(result.periods, now).current);
       setCurrency((c) => c || preferredCurrency(result.txns));
       setError(null);
       setStatus("ready");
@@ -357,17 +383,25 @@ export function DataProvider({ children }: { children: ReactNode }) {
     };
   }, [apply, loadLimits, loadRecurring, drainQueued]);
 
-  // New SMS change what's been spent and what recurs: refresh the meters and recurring. The first load already
-  // has them, unless it failed and a retry (Try again, coming back to the tab) is what made the app ready.
+  // Pay periods follow Salary credits (new, edited, recategorised, deleted); a failure keeps the last list.
+  const loadPeriods = useCallback(
+    () => getPeriods().then((next) => setPeriods((current) => (same(current, next) ? current : next)), () => {}),
+    [],
+  );
+
+  // New SMS change what's been spent, what recurs and where pay periods start: refresh the meters, recurring and
+  // periods. The first load already has them, unless it failed and a retry (Try again, coming back to the tab) is
+  // what made the app ready.
   useEffect(() => {
     if (status !== "ready") return;
     if (limitsTxns.current === null ? reloadOptional.current : limitsTxns.current !== txns) {
       void loadLimits();
       void loadRecurring();
+      void loadPeriods();
     }
     reloadOptional.current = false;
     limitsTxns.current = txns;
-  }, [status, txns, loadLimits, loadRecurring]);
+  }, [status, txns, loadLimits, loadRecurring, loadPeriods]);
 
   // Coming back to the tab/home-screen app picks up SMS that arrived meanwhile.
   useEffect(() => {
@@ -452,6 +486,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setInbox(EMPTY_INBOX);
       setLimits(null);
       setSettings(null);
+      setPeriods(null);
       setRecurring(null);
       setRecurringFailed(false);
       setSelectedId(null);
@@ -494,6 +529,19 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setSettings(next);
     return next;
   }, []);
+
+  const setPayday = useCallback(
+    async (on: boolean) => {
+      const next = await apiSaveSettings({ "periods.payday": on });
+      setSettings(next);
+      void loadLimits(); // monthly windows follow the setting
+      const fresh = await getPeriods().catch(() => null);
+      if (!fresh) return; // keeps the last list; the next transaction change reloads it
+      setPeriods(fresh);
+      setMonth(monthCalendar(fresh, today).current);
+    },
+    [loadLimits, today],
+  );
 
   // The balance moves with a bank entry; the next poll would catch it, this is just sooner.
   const reloadBalance = useCallback(
@@ -552,6 +600,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
           void loadLimits();
           // The list changed on screen before the server deleted it, so the txns effect reloaded too early.
           void loadRecurring();
+          void loadPeriods();
         },
         () => {
           // Nothing disappears silently: put it back and say so.
@@ -562,7 +611,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         },
       );
     },
-    [reloadBalance, loadLimits, loadRecurring, settle],
+    [reloadBalance, loadLimits, loadRecurring, loadPeriods, settle],
   );
 
   /** Sends the delete waiting for its undo window right away; true if there was one. */
@@ -676,20 +725,24 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const closeNotifications = useCallback(() => setNotificationsOpenedAt(0), []);
   const closeTransaction = useCallback(() => setSelectedId(null), []);
 
+  // Pay periods are applied here, not in prepare(): merging and polling keep working on the prepared rows.
+  const cal = useMemo(() => monthCalendar(periods, today), [periods, today]);
+  const shown = useMemo(() => applyPeriods(txns, cal), [txns, cal]);
+
   const value = useMemo<DataContextValue>(
     () => ({
       status,
       user,
-      txns,
+      txns: shown,
       error,
       refreshing,
       today,
       month,
       setMonth,
-      months: today ? availableMonths(txns, monthOf(today)) : [],
+      months: today ? availableMonths(shown, cal.current) : [],
       currency,
       setCurrency,
-      currencies: listCurrencies(txns),
+      currencies: listCurrencies(shown),
       refresh,
       signOut,
       balance,
@@ -704,6 +757,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       decideRecurring,
       settings,
       saveSettings,
+      cal,
+      periods,
+      setPayday,
       inbox,
       notificationsOpen: notificationsOpenedAt > 0,
       notificationsOpenedAt,
@@ -722,7 +778,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       dismissDeletion,
       deleting,
       pollNow: poll,
-      selected: (selectedId && txns.find((t) => t.id === selectedId)) || null,
+      selected: (selectedId && shown.find((t) => t.id === selectedId)) || null,
       openTransaction: setSelectedId,
       closeTransaction,
       activityRequest,
@@ -736,7 +792,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [
       status,
       user,
-      txns,
+      shown,
       error,
       refreshing,
       today,
@@ -756,6 +812,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       decideRecurring,
       settings,
       saveSettings,
+      cal,
+      periods,
+      setPayday,
       inbox,
       notificationsOpenedAt,
       openNotifications,

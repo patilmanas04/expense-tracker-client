@@ -688,7 +688,53 @@ function AppearanceSection() {
           {theme === "system" ? `Follows your phone's setting, currently ${resolved}.` : `Always ${theme}, on this device.`}
         </p>
       </div>
+      <PaydayRow />
     </Group>
+  );
+}
+
+/** "Month starts on payday": saved on the server, then periods and limits reload (data provider). */
+function PaydayRow() {
+  const { settings, periods, setPayday } = useData();
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  if (!settings) {
+    return <p className="p-4 text-[13px] text-ink-2">This setting isn&apos;t available right now. Tap Sync below to try again.</p>;
+  }
+  const on = settings["periods.payday"] === true; // an older server doesn't send it: off
+
+  const toggle = async (value: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await setPayday(value);
+    } catch (err) {
+      setError(settingError(err, "Couldn't save this setting."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] text-ink">Month starts on payday</p>
+          <p className="text-[13px] text-ink-2">
+            {on && periods?.enabled && periods.periods.length === 0
+              ? "No salary found yet — months stay 1st–end until one arrives. Set your salary credit's category to Salary."
+              : "Each month runs from the day your salary (category Salary) arrives to the day before the next one."}
+          </p>
+        </div>
+        <Switch label="Month starts on payday" checked={on} onChange={(v) => void toggle(v)} disabled={busy} />
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

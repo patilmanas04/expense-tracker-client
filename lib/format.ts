@@ -80,6 +80,12 @@ export function timeAgo(iso: string, now: number): string {
 const shortDate = new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, day: "numeric", month: "short" });
 export const shortDayLabel = (day: string) => shortDate.format(fromDay(day));
 
+/** "Nov · 31 Oct – 29 Nov", "Nov · 31 Oct – today" (last null), "Nov 2025 · 31 Oct – 2 Dec" (withYear). */
+export function periodLabel(month: string, first: string, last: string | null, withYear = false): string {
+  const name = withYear ? `${monthShortName(month)} ${month.slice(0, 4)}` : monthShortName(month);
+  return `${name} · ${shortDayLabel(first)} – ${last === null ? "today" : shortDayLabel(last)}`;
+}
+
 const weekdayDate = new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, weekday: "short", day: "numeric", month: "short" });
 /** "Mon, 16 Nov" */
 export const weekdayDayLabel = (day: string) => weekdayDate.format(fromDay(day));

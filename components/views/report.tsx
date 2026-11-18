@@ -10,12 +10,13 @@ import {
   categoryBreakdown,
   dailySeries,
   frequentSmallSpends,
+  monthTitle,
   monthTotals,
   monthlyTrend,
   spendingPace,
   topMerchants,
 } from "@/lib/analytics";
-import { formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
+import { formatMoney, shortDayLabel } from "@/lib/format";
 import type { TxType } from "@/lib/types";
 
 import { DailyBars, EXPENSE_COLOR, INCOME_COLOR, TrendBars } from "../charts/bars";
@@ -29,18 +30,24 @@ import { hasRecurringCard, RecurringCard } from "./recurring";
 const CATEGORY_PREVIEW = 6;
 
 export function ReportView() {
-  const { txns, month, setMonth, months, currency, today, requestActivity, openTransaction, recurring } = useData();
+  const { txns, month, setMonth, months, currency, today, cal, requestActivity, openTransaction, recurring } = useData();
   const router = useRouter();
   const [type, setType] = useState<TxType>("DEBIT");
   const [chart, setChart] = useState<"donut" | "bars">("donut");
   const [showAll, setShowAll] = useState(false);
 
-  const categories = useMemo(() => categoryBreakdown(txns, month, currency, type, today), [txns, month, currency, type, today]);
-  const daily = useMemo(() => dailySeries(txns, month, currency, today), [txns, month, currency, today]);
+  const categories = useMemo(
+    () => categoryBreakdown(txns, month, currency, type, today, cal),
+    [txns, month, currency, type, today, cal],
+  );
+  const daily = useMemo(() => dailySeries(txns, month, currency, today, cal), [txns, month, currency, today, cal]);
   const trend = useMemo(() => monthlyTrend(txns, month, currency), [txns, month, currency]);
   const merchants = useMemo(() => topMerchants(txns, month, currency, type), [txns, month, currency, type]);
   const invested = useMemo(() => monthTotals(txns, month, currency).invested, [txns, month, currency]);
-  const pace = useMemo(() => (type === "DEBIT" ? spendingPace(txns, month, currency, today) : null), [txns, month, currency, today, type]);
+  const pace = useMemo(
+    () => (type === "DEBIT" ? spendingPace(txns, month, currency, today, cal) : null),
+    [txns, month, currency, today, cal, type],
+  );
   // Habits are in rupees and about spending only.
   const habitsOn = currency === "INR" && type === "DEBIT";
   const frequent = useMemo(() => (habitsOn ? frequentSmallSpends(txns, month) : []), [txns, month, habitsOn]);
@@ -68,7 +75,7 @@ export function ReportView() {
           </Link>
           <h1 className="truncate text-[22px] font-semibold tracking-tight text-ink lg:text-3xl">Report</h1>
         </div>
-        <SelectPill label="Month" value={month} onChange={setMonth} options={months.map((m) => ({ value: m, label: monthLabel(m) }))} />
+        <SelectPill label="Month" value={month} onChange={setMonth} options={months.map((m) => ({ value: m, label: monthTitle(cal, m) }))} />
       </header>
 
       <Segmented
@@ -167,7 +174,7 @@ export function ReportView() {
             </p>
           </div>
           {categories.length === 0 ? (
-            <Card className="p-6 text-center text-[15px] text-ink-2">No {noun.toLowerCase()} recorded in {monthLabel(month)}.</Card>
+            <Card className="p-6 text-center text-[15px] text-ink-2">No {noun.toLowerCase()} recorded in {monthTitle(cal, month)}.</Card>
           ) : (
             <ul className="space-y-3">
               {visibleCategories.map((stat) => (
@@ -202,7 +209,7 @@ export function ReportView() {
         </Card>
 
         <div className="order-8 lg:order-none lg:col-span-2">
-          <TrendCard txns={txns} month={month} currency={currency} today={today} />
+          <TrendCard txns={txns} month={month} currency={currency} today={today} cal={cal} />
         </div>
       </div>
     </div>
