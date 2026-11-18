@@ -46,6 +46,10 @@ export interface ActivityRequest {
   category?: string;
   /** "YYYY-MM"; omitted means all time. */
   month?: string;
+  /** A normalised tag, without "#". */
+  tag?: string;
+  /** A transaction id: its sheet opens over Activity (the provider does this when the request is made). */
+  txn?: string;
   focusSearch?: boolean;
 }
 
@@ -559,7 +563,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
       openTransaction: setSelectedId,
       closeTransaction,
       activityRequest,
-      requestActivity: (request) => setActivityRequest({ ...request, nonce: Date.now() }),
+      requestActivity: (request) => {
+        setActivityRequest({ ...request, nonce: Date.now() });
+        // Opened here, at the time of the request, so Activity never updates this provider while rendering.
+        // An unknown id opens nothing (`selected` stays null).
+        if (request.txn) setSelectedId(request.txn);
+      },
     }),
     [
       status,

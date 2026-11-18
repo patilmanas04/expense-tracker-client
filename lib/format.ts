@@ -80,6 +80,19 @@ export function timeAgo(iso: string, now: number): string {
 const shortDate = new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, day: "numeric", month: "short" });
 export const shortDayLabel = (day: string) => shortDate.format(fromDay(day));
 
+/** Days from `from` to `to` inclusive ("YYYY-MM-DD", IST): 12 → 18 Oct is 7. */
+export function daySpan(from: string, to: string): number {
+  return Math.round((fromDay(to).getTime() - fromDay(from).getTime()) / 86_400_000) + 1;
+}
+
+/** "12 Oct" (same day), "12–18 Oct", "28 Sept – 3 Oct", "28 Dec 2025 – 3 Jan 2026". */
+export function dayRangeLabel(from: string, to: string): string {
+  if (from === to) return shortDayLabel(from);
+  if (from.slice(0, 7) === to.slice(0, 7)) return `${dayOfMonth(from)}–${shortDayLabel(to)}`;
+  if (from.slice(0, 4) === to.slice(0, 4)) return `${shortDayLabel(from)} – ${shortDayLabel(to)}`;
+  return `${shortDayLabel(from)} ${from.slice(0, 4)} – ${shortDayLabel(to)} ${to.slice(0, 4)}`;
+}
+
 const timeFormat = new Intl.DateTimeFormat("en-IN", {
   timeZone: TIME_ZONE,
   hour: "numeric",

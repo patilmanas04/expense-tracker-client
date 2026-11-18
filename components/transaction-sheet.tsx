@@ -1,17 +1,19 @@
 "use client";
 
 import { Check, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
-import { useEffect, useRef, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 
 import { carriedForward, parsedByLabel, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
 import { dateTimeLabel, formatMoney, monthLabel } from "@/lib/format";
+import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
 import type { TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
 import { useSheetDrag } from "./sheet-drag";
 import { TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
-import { transactionTitle } from "./transactions";
+import { TagChips, transactionTitle } from "./transactions";
 import { Amount, CategoryTile, cx } from "./ui";
 
 /** iOS navigation-bar capsule: "Edit", "Cancel", "Done". */
@@ -285,15 +287,20 @@ const MAX_NOTE = 500;
 
 /** Your own note on a transaction: where it was, what it was for. Added and changed in place. */
 function NoteCard({ t }: { t: Txn }) {
-  const { updateTransaction } = useData();
+  const { updateTransaction, txns } = useData();
   const areaRef = useRef<HTMLTextAreaElement>(null);
   const addRef = useRef<HTMLButtonElement>(null);
   const [draft, setDraft] = useState<string | null>(null); // set while writing
+  const [caret, setCaret] = useState(0); // where the caret is in `draft`, for tag suggestions
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const writing = draft !== null;
   const writingRef = useRef(false);
   const note = t.notes ?? "";
+  const known = useMemo(() => allTags(txns), [txns]);
+  // A tag being typed just before the caret ("#g") suggests existing ones ("#goa (18)").
+  const typing = writing && !saving ? partialTagAt(draft, caret) : null;
+  const suggestions = typing ? suggestTags(known, typing.partial) : [];
 
   // Writing focuses the box with the caret at the end; finishing puts focus back on the button.
   useEffect(() => {
@@ -332,7 +339,10 @@ function NoteCard({ t }: { t: Txn }) {
       <button
         ref={addRef}
         type="button"
-        onClick={() => setDraft("")}
+        onClick={() => {
+          setDraft("");
+          setCaret(0);
+        }}
         className="mt-4 flex w-full items-center gap-2 rounded-card border border-dashed border-line bg-surface/60 px-4 py-3.5 text-left text-sm font-medium text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet"
       >
         <Plus size={16} aria-hidden /> Add a note
@@ -350,7 +360,10 @@ function NoteCard({ t }: { t: Txn }) {
           <button
             ref={addRef}
             type="button"
-            onClick={() => setDraft(note)}
+            onClick={() => {
+              setDraft(note);
+              setCaret(note.length);
+            }}
             aria-label="Edit note"
             className="-my-1 rounded-full px-2 py-1 text-sm font-semibold text-violet focus-visible:outline-2 focus-visible:outline-violet"
           >
@@ -365,8 +378,10 @@ function NoteCard({ t }: { t: Txn }) {
             value={draft}
             onChange={(e) => {
               setDraft(e.target.value);
+              setCaret(e.target.selectionStart);
               setError(null);
             }}
+            onSelect={(e) => setCaret(e.currentTarget.selectionStart)}
             onKeyDown={(e) => {
               if (e.key === "Escape") {
                 e.preventDefault(); // keeps the sheet open
@@ -388,6 +403,33 @@ function NoteCard({ t }: { t: Txn }) {
               {error}
             </p>
           ) : null}
+          {typing && suggestions.length ? (
+            <div className="mt-2 flex flex-wrap gap-1.5" role="group" aria-label="Tag suggestions">
+              {suggestions.map(({ tag, count }) => {
+                const next = insertTag(draft, typing.start, caret, tag);
+                return (
+                  <button
+                    key={tag}
+                    type="button"
+                    disabled={next.text.length > MAX_NOTE}
+                    onMouseDown={(e) => e.preventDefault()} // keeps the caret in the note on desktop
+                    onClick={() => {
+                      flushSync(() => {
+                        setDraft(next.text);
+                        setCaret(next.caret);
+                      });
+                      const area = areaRef.current;
+                      area?.focus({ preventScroll: true });
+                      area?.setSelectionRange(next.caret, next.caret);
+                    }}
+                    className="h-8 max-w-full truncate rounded-full border border-line bg-canvas px-3 text-[13px] font-medium text-violet-strong transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50"
+                  >
+                    #{tag} ({count})
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
           <div className="mt-3 flex items-center gap-2">
             {note ? (
               <button type="button" onClick={() => save("")} disabled={saving} className={cx(CAPSULE, "px-2 text-expense")}>
@@ -406,7 +448,10 @@ function NoteCard({ t }: { t: Txn }) {
           </div>
         </>
       ) : (
-        <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap text-ink">{note}</p>
+        <>
+          <p className="text-[15px] leading-relaxed break-words whitespace-pre-wrap text-ink">{note}</p>
+          <TagChips tags={t.tags} className="mt-3" />
+        </>
       )}
     </div>
   );

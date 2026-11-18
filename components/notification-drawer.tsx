@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
 import { timeAgo } from "@/lib/format";
+import { activityRequestFromLink } from "@/lib/links";
 import type { AppNotification } from "@/lib/types";
 
 import { useData } from "./data-provider";
@@ -84,6 +85,12 @@ export function NotificationDrawer() {
   const open = (n: AppNotification) => {
     if (!n.read) void markNotificationsRead([n.id]);
     if (!n.link) return; // nothing to open (notifications with buttons have no link)
+    // /activity?kind=review, ?tag=goa or ?txn=<id>: Activity with that filter, or that transaction's sheet.
+    const request = activityRequestFromLink(n.link);
+    if (request) {
+      requestActivity(request);
+      return go("/activity");
+    }
     go(n.link === OLD_LIMITS_PATH ? LIMITS_PATH : n.link);
   };
   const act = async (n: AppNotification, path: string) => {

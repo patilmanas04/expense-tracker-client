@@ -1,6 +1,7 @@
 "use client";
 
 import { Banknote, CornerDownRight, CreditCard, NotebookPen, TriangleAlert } from "lucide-react";
+import { useRouter } from "next/navigation";
 
 import { carriedForward, groupByDay, type Txn } from "@/lib/analytics";
 import { CASH_ACCOUNT, categoryMeta, categoryName, UNCATEGORIZED } from "@/lib/categories";
@@ -17,6 +18,34 @@ export function transactionTitle(t: Txn) {
 
 /** "HDFC XX4821" -> "HDFC ••4821", compact enough for a phone row. */
 const shortAccount = (ref: string) => ref.replace(/\b[xX*]{2,}(?=\d)/, "••");
+
+/** "#goa" chips; tapping one opens Activity filtered to that tag (closing the transaction sheet). */
+export function TagChips({ tags, className }: { tags: string[]; className?: string }) {
+  const { requestActivity, closeTransaction } = useData();
+  const router = useRouter();
+  if (!tags.length) return null;
+  const open = (tag: string) => {
+    closeTransaction();
+    requestActivity({ tag });
+    router.push("/activity");
+  };
+  return (
+    <ul className={cx("flex min-w-0 flex-wrap gap-1.5", className)} aria-label="Tags">
+      {tags.map((tag) => (
+        <li key={tag} className="min-w-0">
+          <button
+            type="button"
+            onClick={() => open(tag)}
+            aria-label={`Show transactions tagged ${tag}`}
+            className="block h-6 max-w-full truncate rounded-full bg-violet-soft px-2 text-[12px] leading-6 font-medium text-violet-strong transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet"
+          >
+            #{tag}
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
+}
 
 /** A transaction in a list: tap for details, swipe left to delete (with Undo). */
 export function TransactionRow({ t }: { t: Txn }) {
@@ -91,6 +120,8 @@ export function TransactionRow({ t }: { t: Txn }) {
           ) : null}
         </span>
       </button>
+      {/* Beside the row's button, never inside it (no nested buttons); lined up with the title. */}
+      <TagChips tags={t.tags} className="-mt-1.5 pr-3.5 pb-3.5 pl-[76px] sm:pr-4 sm:pb-4 sm:pl-[78px]" />
     </SwipeToDelete>
   );
 }

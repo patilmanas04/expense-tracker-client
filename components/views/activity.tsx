@@ -1,14 +1,16 @@
 "use client";
 
-import { CalendarDays, Check, Plus, Search, SearchX, X } from "lucide-react";
+import { CalendarDays, Check, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
-import { counts, type Txn } from "@/lib/analytics";
-import { categoryName } from "@/lib/categories";
-import { dayKey, formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
+import { counts, tripSummary, type Txn } from "@/lib/analytics";
+import { categoryMeta, categoryName } from "@/lib/categories";
+import { dayKey, dayRangeLabel, formatMoney, monthLabel, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
+import { allTags, tagQuery } from "@/lib/tags";
 
 import { AddTransactionSheet } from "../add-transaction";
 import { useData, type KindFilter } from "../data-provider";
+import { MoreFiltersSheet } from "../more-filters-sheet";
 import { TransactionGroups } from "../transactions";
 import { Card, SelectPill, cx } from "../ui";
 
@@ -18,9 +20,14 @@ const ALL = "ALL";
 const TODAY = "today";
 const YESTERDAY = "yesterday";
 const ON_DAY = "on-day";
+/** A from/to range of days, either end optional. */
+const RANGE = "range";
+
+/** IST "YYYY-MM-DD" days, both inclusive. */
+type DayRange = { from?: string; to?: string };
 
 /** Whether a transaction falls in the chosen period; days are India time, like the rest of the app. */
-function inPeriod(t: Txn, period: string, day: string, today: string, yesterday: string) {
+function inPeriod(t: Txn, period: string, day: string, range: DayRange, today: string, yesterday: string) {
   switch (period) {
     case ALL:
       return true;
@@ -30,9 +37,88 @@ function inPeriod(t: Txn, period: string, day: string, today: string, yesterday:
       return t.day === yesterday;
     case ON_DAY:
       return t.day === day;
+    case RANGE:
+      return (!range.from || t.day >= range.from) && (!range.to || t.day <= range.to);
     default:
       return t.month === period;
   }
+}
+
+/** What's typed in More filters' amount boxes ("2,000.50"), as typed. */
+export type AmountText = { min: string; max: string };
+/** Bounds in rupees; while there's an error there are none (the filter is off until it's fixed). */
+type AmountFilter = { min?: number; max?: number; error: string | null };
+
+function readAmountFilter(text: AmountText): AmountFilter {
+  const read = (s: string) => {
+    if (!s.trim()) return undefined;
+    const value = parseAmountInput(s);
+    return value === null || value.startsWith("-") ? null : Number(value);
+  };
+  const min = read(text.min);
+  const max = read(text.max);
+  if (min === null || max === null) return { error: "Enter amounts like 2000 or 2,000.50" };
+  if (min !== undefined && max !== undefined && min > max) return { error: "At least is more than At most" };
+  return { min, max, error: null };
+}
+
+/** The row's own amount, in its own currency. Unreadable SMS (no real amount) never match a bound. */
+function inAmount(t: Txn, f: AmountFilter) {
+  if (f.min === undefined && f.max === undefined) return true;
+  return t.is_parsed && (f.min === undefined || t.minor >= toMinor(f.min)) && (f.max === undefined || t.minor <= toMinor(f.max));
+}
+
+/** Everything the search box matches against, lower case. */
+const searchText = (t: Txn) =>
+  [t.merchant, categoryName(t), t.notes, t.account_ref, t.reference_id, t.sender, t.raw_message, t.amount.toFixed(2)]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+
+interface ActiveFilters {
+  period: string;
+  day: string;
+  range: DayRange;
+  today: string;
+  yesterday: string;
+  kind: KindFilter;
+  category: string;
+  /** From the Tags pill, a chip or a link. */
+  tag: string | null;
+  /** The search box holding exactly one tag ("#goa"); it then filters by tag instead of text. */
+  searchTag: string | null;
+  text: string;
+  amount: AmountFilter;
+}
+
+/** Every filter applies together (AND). `haystack` is the row's `searchText`. */
+function matches(t: Txn, f: ActiveFilters, haystack: string) {
+  return (
+    inPeriod(t, f.period, f.day, f.range, f.today, f.yesterday) &&
+    (f.kind === "ALL" || (f.kind === "REVIEW" ? !t.is_parsed : t.is_parsed && t.type === f.kind)) &&
+    (f.category === ALL || (t.is_parsed && categoryName(t) === f.category)) &&
+    (!f.tag || t.tags.includes(f.tag)) &&
+    (!f.searchTag || t.tags.includes(f.searchTag)) &&
+    inAmount(t, f.amount) &&
+    (!f.text || haystack.includes(f.text))
+  );
+}
+
+/** "1–15 Oct", "From 1 Oct", "Until 15 Oct" or "Date range…". */
+function rangeLabel(range: DayRange) {
+  if (range.from && range.to) return dayRangeLabel(range.from, range.to);
+  if (range.from) return `From ${shortDayLabel(range.from)}`;
+  if (range.to) return `Until ${shortDayLabel(range.to)}`;
+  return "Date range…";
+}
+
+/** "₹2,000–₹5,000", "At least ₹2,000", "At most ₹5,000", or null with no bounds. */
+function amountLabel(f: AmountFilter, currency: string) {
+  const money = (x: number) => formatMoney(toMinor(x), currency, { decimals: !Number.isInteger(x) });
+  if (f.min !== undefined && f.max !== undefined) return `${money(f.min)}–${money(f.max)}`;
+  if (f.min !== undefined) return `At least ${money(f.min)}`;
+  if (f.max !== undefined) return `At most ${money(f.max)}`;
+  return null;
 }
 
 export function ActivityView() {
@@ -42,6 +128,10 @@ export function ActivityView() {
   const [category, setCategory] = useState(ALL);
   const [period, setPeriod] = useState(ALL);
   const [day, setDay] = useState(""); // "YYYY-MM-DD" for "Pick a date"
+  const [range, setRange] = useState<DayRange>({}); // for "Date range…"
+  const [tag, setTag] = useState<string | null>(null);
+  const [amountText, setAmountText] = useState<AmountText>({ min: "", max: "" });
+  const [moreOpen, setMoreOpen] = useState(false);
   const yesterday = today ? dayKey(Date.parse(`${today}T12:00:00+05:30`) - 86_400_000) : "";
   const dateRef = useRef<HTMLInputElement>(null);
   const [visible, setVisible] = useState(PAGE);
@@ -50,16 +140,23 @@ export function ActivityView() {
   const [added, setAdded] = useState<Txn | null>(null);
   // Stable, so a live update re-rendering this page doesn't reset focus inside the open sheet.
   const closeAdd = useCallback(() => setAdding(false), []);
+  const closeMore = useCallback(() => setMoreOpen(false), []);
   const searchRef = useRef<HTMLInputElement>(null);
   const sentinelRef = useRef<HTMLDivElement>(null);
 
-  // Another screen asked for a filtered view (e.g. a category card or the review bell).
+  // Another screen asked for a filtered view (e.g. a category card, a tag chip or a notification).
+  // A request's `txn` (open that transaction) is handled by the provider when the request is made.
   if (activityRequest && activityRequest.nonce !== appliedNonce) {
     setAppliedNonce(activityRequest.nonce);
-    if (activityRequest.kind || activityRequest.category || activityRequest.month) {
-      setKind(activityRequest.kind ?? "ALL");
-      setCategory(activityRequest.category ?? ALL);
-      setPeriod(activityRequest.month ?? ALL);
+    const request = activityRequest;
+    if (request.kind || request.category || request.month || request.tag) {
+      setKind(request.kind ?? "ALL");
+      setCategory(request.category ?? ALL);
+      setPeriod(request.month ?? ALL);
+      setTag(request.tag ?? null);
+      setDay("");
+      setRange({});
+      setAmountText({ min: "", max: "" });
       setQuery("");
     }
     setVisible(PAGE);
@@ -69,18 +166,25 @@ export function ActivityView() {
     if (activityRequest?.focusSearch) searchRef.current?.focus();
   }, [activityRequest]);
 
-  const searchable = useMemo(
-    () =>
-      new Map(
-        txns.map((t) => [
-          t.id,
-          [t.merchant, categoryName(t), t.notes, t.account_ref, t.reference_id, t.sender, t.raw_message, t.amount.toFixed(2)]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase(),
-        ]),
-      ),
-    [txns],
+  const searchable = useMemo(() => new Map(txns.map((t) => [t.id, searchText(t)])), [txns]);
+  const tags = useMemo(() => allTags(txns), [txns]);
+  const searchTag = tagQuery(query);
+  const amount = useMemo(() => readAmountFilter(amountText), [amountText]);
+  const filters = useMemo<ActiveFilters>(
+    () => ({
+      period,
+      day,
+      range,
+      today,
+      yesterday,
+      kind,
+      category,
+      tag,
+      searchTag,
+      text: searchTag ? "" : query.trim().toLowerCase(),
+      amount,
+    }),
+    [period, day, range, today, yesterday, kind, category, tag, searchTag, query, amount],
   );
 
   const categoryOptions = useMemo(
@@ -90,16 +194,10 @@ export function ActivityView() {
 
   const reviewCount = useMemo(() => txns.filter((t) => !t.is_parsed).length, [txns]);
 
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return txns.filter(
-      (t) =>
-        inPeriod(t, period, day, today, yesterday) &&
-        (kind === "ALL" || (kind === "REVIEW" ? !t.is_parsed : t.is_parsed && t.type === kind)) &&
-        (category === ALL || (t.is_parsed && categoryName(t) === category)) &&
-        (!q || searchable.get(t.id)?.includes(q)),
-    );
-  }, [txns, query, kind, category, period, day, today, yesterday, searchable]);
+  const filtered = useMemo(
+    () => txns.filter((t) => matches(t, filters, searchable.get(t.id) ?? "")),
+    [txns, filters, searchable],
+  );
 
   // The confirmation under the header fades after a few seconds.
   useEffect(() => {
@@ -119,6 +217,10 @@ export function ActivityView() {
     return { spent, received };
   }, [filtered, currency]);
 
+  // A tag (picked, or searched as "#goa") reads as a trip: its dates and where the money went.
+  const tripTag = tag ?? searchTag;
+  const trip = useMemo(() => (tripTag ? tripSummary(filtered, currency) : null), [tripTag, filtered, currency]);
+
   // Render long histories progressively as the list scrolls.
   useEffect(() => {
     const sentinel = sentinelRef.current;
@@ -137,6 +239,9 @@ export function ActivityView() {
     setCategory(ALL);
     setPeriod(ALL);
     setDay("");
+    setRange({});
+    setTag(null);
+    setAmountText({ min: "", max: "" });
   };
 
   const choosePeriod = (value: string) => {
@@ -150,19 +255,30 @@ export function ActivityView() {
       // not supported here: the calendar button next to the menu opens it
     }
   };
-  const filtersActive = query || kind !== "ALL" || category !== ALL || period !== ALL;
+  const filtersActive =
+    query ||
+    kind !== "ALL" ||
+    category !== ALL ||
+    period !== ALL ||
+    tag !== null ||
+    amountText.min.trim() ||
+    amountText.max.trim();
 
   const onAdded = (txn: Txn) => {
     setAdded(txn);
     // Don't let the current filters hide what you just added.
-    const visible =
-      inPeriod(txn, period, day, today, yesterday) &&
-      (kind === "ALL" || kind === txn.type) &&
-      (category === ALL || categoryName(txn) === category) &&
-      !query.trim();
-    if (!visible) resetFilters();
+    if (!matches(txn, filters, searchText(txn))) resetFilters();
     setVisible(PAGE);
   };
+
+  // One side of "Date range…"; empty leaves that end open, and a start after the end swaps them.
+  const changeRange = (side: keyof DayRange, value: string) => {
+    const next: DayRange = { ...range, [side]: value || undefined };
+    if (next.from && next.to && next.from > next.to) [next.from, next.to] = [next.to, next.from];
+    setRange(next);
+    setVisible(PAGE);
+  };
+  const amountPill = amountLabel(amount, currency);
 
   const chips: { value: KindFilter; label: string }[] = [
     { value: "ALL", label: "All" },
@@ -265,6 +381,7 @@ export function ActivityView() {
             { value: TODAY, label: "Today" },
             { value: YESTERDAY, label: "Yesterday" },
             { value: ON_DAY, label: period === ON_DAY && day ? `On ${shortDayLabel(day)}` : "Pick a date…" },
+            { value: RANGE, label: period === RANGE ? rangeLabel(range) : "Date range…" },
             ...months.map((m) => ({ value: m, label: monthLabel(m) })),
           ]}
         />
@@ -307,12 +424,60 @@ export function ActivityView() {
           size="sm"
           className="max-w-full"
         />
+        {tags.length || tag !== null ? (
+          <SelectPill
+            label="Tags"
+            value={tag ?? ALL}
+            onChange={(v) => {
+              setTag(v === ALL ? null : v);
+              setVisible(PAGE);
+            }}
+            options={[
+              { value: ALL, label: "All tags" },
+              ...tags.map((t) => ({ value: t.tag, label: `#${t.tag} (${t.count})` })),
+              // A tag from a link that no note has (any more) still shows, so it can be cleared.
+              ...(tag !== null && !tags.some((t) => t.tag === tag) ? [{ value: tag, label: `#${tag} (0)` }] : []),
+            ]}
+            size="sm"
+            className="max-w-full"
+          />
+        ) : null}
+        <button
+          type="button"
+          onClick={() => setMoreOpen(true)}
+          aria-haspopup="dialog"
+          className="inline-flex h-8 max-w-full min-w-0 items-center gap-1 rounded-full border border-line bg-surface px-3 text-[13px] font-medium text-ink shadow-card transition hover:bg-raised focus-visible:outline-2 focus-visible:outline-violet"
+        >
+          <SlidersHorizontal size={14} className="shrink-0" aria-hidden />
+          {amount.error ? (
+            <span className="truncate text-warn">Fix amount</span>
+          ) : (
+            <span className="truncate">{amountPill ?? "More filters"}</span>
+          )}
+        </button>
         {filtersActive ? (
           <button type="button" onClick={resetFilters} className="h-8 rounded-full px-3 text-[13px] font-medium text-violet-strong hover:bg-violet-soft">
             Reset
           </button>
         ) : null}
       </div>
+
+      {period === RANGE ? (
+        <div className="mt-2 grid grid-cols-2 gap-2">
+          {(["from", "to"] as const).map((side) => (
+            <label key={side} className="min-w-0">
+              <span className="mb-1 block px-1 text-xs text-ink-2">{side === "from" ? "From" : "To"}</span>
+              <input
+                type="date"
+                value={range[side] ?? ""}
+                max={today}
+                onChange={(e) => changeRange(side, e.target.value)}
+                className="h-10 w-full min-w-0 rounded-full border border-line bg-surface px-3 text-[16px] text-ink shadow-card outline-none focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
+              />
+            </label>
+          ))}
+        </div>
+      ) : null}
 
       {filtered.length > 0 ? (
         <div className="mt-5 grid grid-cols-2 gap-3">
@@ -325,6 +490,30 @@ export function ActivityView() {
             <p className="mt-0.5 truncate text-lg font-semibold text-income tabular-nums">{formatMoney(summary.received, currency)}</p>
           </Card>
         </div>
+      ) : null}
+
+      {filtered.length > 0 && trip && tripTag ? (
+        <Card className="mt-3 px-4 py-3">
+          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink">
+            <Hash size={14} className="shrink-0 text-violet-strong" aria-hidden />
+            <span className="sr-only">Tag </span>
+            <span className="truncate">{tripTag}</span>
+          </p>
+          <p className="mt-0.5 text-[13px] text-ink-2">
+            {dayRangeLabel(trip.from, trip.to)} ({trip.days} {trip.days === 1 ? "day" : "days"})
+          </p>
+          {trip.top.length ? (
+            <ul className="mt-2 space-y-1.5" aria-label="Top categories">
+              {trip.top.map((c) => (
+                <li key={c.name} className="flex min-w-0 items-center gap-2 text-[13px]">
+                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(c.name).color }} />
+                  <span className="min-w-0 flex-1 truncate text-ink">{c.name}</span>
+                  <span className="shrink-0 font-semibold text-ink tabular-nums">{formatMoney(c.minor, currency)}</span>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+        </Card>
       ) : null}
 
       <div className="mt-6">
@@ -356,6 +545,17 @@ export function ActivityView() {
       </div>
 
       {adding ? <AddTransactionSheet onClose={closeAdd} onAdded={onAdded} /> : null}
+      {moreOpen ? (
+        <MoreFiltersSheet
+          amountText={amountText}
+          error={amount.error}
+          onChange={(next) => {
+            setAmountText(next);
+            setVisible(PAGE);
+          }}
+          onClose={closeMore}
+        />
+      ) : null}
     </div>
   );
 }

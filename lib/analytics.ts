@@ -2,6 +2,7 @@ import { INVESTED, NOT_COUNTED, SALARY, SALARY_NEXT_MONTH_FROM, categoryName } f
 import {
   dayKey,
   dayOfMonth,
+  daySpan,
   daysInMonth,
   formatPercent,
   monthName,
@@ -10,6 +11,7 @@ import {
   shiftMonth,
   toMinor,
 } from "./format";
+import { tagsOf } from "./tags";
 import type { Transaction, TxType } from "./types";
 
 /** A transaction with precomputed IST day/month and an integer amount in paise. */
@@ -22,6 +24,8 @@ export interface Txn extends Transaction {
   countsIn: string;
   /** Its day within `countsIn`: the 1st when carried forward. For same-days comparisons and daily charts. */
   countsDay: number;
+  /** Tags in the note (lib/tags.ts), computed once in prepare(). */
+  tags: string[];
 }
 
 /** Salary paid on the 16th or later is mostly money for the next month, so it counts there. */
@@ -50,6 +54,7 @@ export function prepare(list: Transaction[]): Txn[] {
       time: Date.parse(iso),
       countsIn: carried ? shiftMonth(monthOf(day), 1) : monthOf(day),
       countsDay: carried ? 1 : dayOfMonth(day),
+      tags: tagsOf(t.notes),
     });
   }
   return out.sort((a, b) => b.time - a.time);
@@ -93,6 +98,36 @@ export const counts = (t: Txn, currency: string) =>
 /** Money put into investments and deposits: "Invested", never Spent. */
 export const isInvested = (t: Txn, currency: string) =>
   t.is_parsed && t.currency === currency && t.type === "DEBIT" && INVESTED.has(categoryName(t));
+
+export interface TripSummary {
+  /** First and last day in the list ("YYYY-MM-DD"). */
+  from: string;
+  to: string;
+  days: number;
+  /** The 3 categories with the most spending, largest first. */
+  top: { name: string; minor: number }[];
+}
+
+/** Span of the listed rows (all of them) and the top 3 spending categories among debits that count; null for an empty list. */
+export function tripSummary(list: Txn[], currency: string): TripSummary | null {
+  if (!list.length) return null;
+  let from = list[0].day;
+  let to = list[0].day;
+  const byCategory = new Map<string, number>();
+  for (const t of list) {
+    if (t.day < from) from = t.day;
+    if (t.day > to) to = t.day;
+    // Doc 15 switches the sums to `t.counted`.
+    if (t.type !== "DEBIT" || !counts(t, currency)) continue;
+    const name = categoryName(t);
+    byCategory.set(name, (byCategory.get(name) ?? 0) + t.minor);
+  }
+  const top = [...byCategory]
+    .map(([name, minor]) => ({ name, minor }))
+    .sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name))
+    .slice(0, 3);
+  return { from, to, days: daySpan(from, to), top };
+}
 
 const sum = (list: Txn[]) => list.reduce((total, t) => total + t.minor, 0);
 
