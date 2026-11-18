@@ -18,6 +18,7 @@ import type {
   RecurringSummary,
   RulePreview,
   RuleSaved,
+  SafeToSpend,
   Settings,
   Transaction,
   TransactionPatch,
@@ -91,6 +92,9 @@ export const saveBalance = (amount: string, asOf?: string) =>
 
 /** How Balance left is worked out: the start, what was counted and what was left out. 404 when no balance is saved. */
 export const getBalanceBreakdown = () => request<BalanceBreakdown>("/api/v1/balance/breakdown");
+
+/** Balance left minus what's still due from the bank before the next payday. 404 when no balance is saved. */
+export const getSafeToSpend = () => request<SafeToSpend>("/api/v1/balance/safe-to-spend");
 
 export const clearBalance = () => request<{ status: string }>("/api/v1/balance", { method: "DELETE" });
 

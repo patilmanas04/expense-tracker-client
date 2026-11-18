@@ -19,7 +19,7 @@ export const UPCOMING_PAGE = "/upcoming";
 /** Rows on Home's card; its total still counts every item in the 7 days. */
 const CARD_ROWS = 4;
 
-const KIND_TEXT: Record<UpcomingKind, string> = { auto_debit: "auto-debit", card_bill: "card bill", expected: "expected" };
+export const KIND_TEXT: Record<UpcomingKind, string> = { auto_debit: "auto-debit", card_bill: "card bill", expected: "expected" };
 
 /** What's left to pay, in minor units: a card bill less the card payments seen since its notice (never below 0). */
 export function stillToPay(item: UpcomingItem): number {
@@ -39,7 +39,7 @@ const dayLabel = (day: string, today: string) =>
   !today || day.slice(0, 4) === today.slice(0, 4) ? shortDayLabel(day) : `${shortDayLabel(day)} ${day.slice(0, 4)}`;
 
 /** Expected payments are a guess from history: "around 5 Dec". Notices have a real due date: Today, Tomorrow, "5 Dec". */
-function whenLabel(item: UpcomingItem, today: string): string {
+export function whenLabel(item: Pick<UpcomingItem, "kind" | "date">, today: string): string {
   if (item.kind === "expected") return `around ${dayLabel(item.date, today)}`;
   if (today) {
     if (item.date === today) return "Today";

@@ -16,6 +16,7 @@ import { Amount, Avatar, Card, IconTile, Segmented, SelectPill, Switch } from ".
 import { BALANCE_PAGE } from "./balance-breakdown";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
 import { RULES_PAGE } from "./rules";
+import { SafeToSpendRow } from "./safe-to-spend";
 
 export function SettingsView() {
   const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut, requestActivity } = useData();
@@ -302,6 +303,7 @@ function BalanceSection() {
                 <p className="text-[12px] text-ink-2">HDFC and ICICI together</p>
               </div>
             </div>
+            <SafeToSpendRow />
             <Row label="Starting balance" value={formatMoney(toMinor(balance.opening_balance), balance.currency)} />
             <Row label="Read at" value={dateTimeLabel(balance.as_of)} />
             <Row

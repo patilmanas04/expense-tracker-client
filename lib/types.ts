@@ -331,6 +331,44 @@ export interface UpcomingList {
   items: UpcomingItem[];
 }
 
+/** "upcoming": salary expected after today; "today"/"late": expected today / already past (items up to today count);
+ * "month_end": fewer than 2 salaries in the last 120 days, so it runs to the end of the month. */
+export type PaydayState = "upcoming" | "today" | "late" | "month_end";
+
+/** Why an item isn't subtracted. */
+export type SafeNote = "card_or_cash" | "paid" | "not_seen";
+
+/** Mirrors `SafeItem` in the backend's safe_to_spend.py. Amounts are decimal strings, `date` "YYYY-MM-DD" (IST). */
+export interface SafeItem {
+  date: string;
+  payee: string;
+  kind: UpcomingKind;
+  status: UpcomingStatus;
+  amount: string;
+  min_amount: string | null;
+  paid_amount: string;
+  /** What was taken off Balance left; "0.00" when `note` says why not. */
+  subtracted: string;
+  note: SafeNote | null;
+}
+
+/** Mirrors `SafeToSpend` in safe_to_spend.py. Amounts are decimal strings, dates "YYYY-MM-DD" (IST). */
+export interface SafeToSpend {
+  currency: string;
+  /** Balance left. */
+  balance: string;
+  /** The expected salary date; for "month_end", the 1st of next month. */
+  next_payday: string;
+  payday_state: PaydayState;
+  /** Days from today to payday (today counted, payday not); null when salary is due today or late. */
+  days: number | null;
+  due: SafeItem[];
+  /** Balance left minus what's subtracted; negative when short. */
+  safe: string;
+  /** Whole rupees a day; null when not positive, or salary is due today or late. */
+  per_day: string | null;
+}
+
 /** Every setting (server: settings_store.KEYS). Later designs add their keys here. */
 export interface Settings {
   /** Whole rupees; null = Off. */
