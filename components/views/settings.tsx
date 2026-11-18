@@ -1,17 +1,18 @@
 "use client";
 
-import { ChevronRight, Gauge, Landmark, ListChecks, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
+import { ChevronRight, Gauge, Landmark, ListChecks, LogOut, Mail, RefreshCw, Scale, Share, SquarePlus } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
 import { needsReview } from "@/lib/analytics";
 import { settingError } from "@/lib/api";
-import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, toMinor } from "@/lib/format";
+import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, shiftDay, toMinor, weekdayDayLabel } from "@/lib/format";
 
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
 import { useTheme, type Theme } from "../theme";
 import { Amount, Avatar, Card, IconTile, Segmented, SelectPill, Switch } from "../ui";
+import { BALANCE_PAGE } from "./balance-breakdown";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
 import { RULES_PAGE } from "./rules";
 
@@ -121,18 +122,46 @@ export function SettingsView() {
   );
 }
 
+/** "Read at" is limited to this long ago (the app's choice; the server takes any past time). */
+const READ_AT_MAX_MS = 7 * 86_400_000;
+
 /** Bank balance the running "Balance left" starts from. */
 function BalanceSection() {
-  const { balance, saveBalance, clearBalance } = useData();
+  const { balance, saveBalance, clearBalance, today } = useData();
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState("");
+  // When you read the balance: "now", or a day ("YYYY-MM-DD", IST) with a time ("HH:MM").
+  const [readDay, setReadDay] = useState("now");
+  const [readTime, setReadTime] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // The field the error is about, for aria-invalid; null when it's about neither (a failed save).
+  const [errorField, setErrorField] = useState<"amount" | "time" | null>(null);
   const [busy, setBusy] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const showForm = editing || !balance;
 
+  const fail = (message: string, field: "amount" | "time" | null = null) => {
+    setError(message);
+    setErrorField(field);
+  };
+  const invalid = (field: "amount" | "time") => Boolean(error) && errorField === field;
+
+  // Now, or one of the last 7 days counting today (a time on the oldest one may still be too early: submit checks).
+  const readDays = useMemo(() => {
+    const options = [{ value: "now", label: "Now" }];
+    if (!today) return options;
+    return [
+      ...options,
+      { value: today, label: "Today" },
+      { value: shiftDay(today, -1), label: "Yesterday" },
+      ...[2, 3, 4, 5, 6].map((n) => ({ value: shiftDay(today, -n), label: weekdayDayLabel(shiftDay(today, -n)) })),
+    ];
+  }, [today]);
+
   const startEditing = () => {
     setDraft(balance ? balance.current.toFixed(2) : "");
+    setReadDay("now");
+    setReadTime("");
     setError(null);
     setEditing(true);
   };
@@ -141,16 +170,35 @@ function BalanceSection() {
     e.preventDefault();
     const amount = parseAmountInput(draft);
     if (amount === null) {
-      setError("Enter an amount like 125000 or 125000.50");
+      fail("Enter an amount like 125000 or 125000.50", "amount");
       return;
+    }
+    // Read earlier: that moment in IST, checked here (the server only refuses future times).
+    let asOf: string | undefined;
+    if (readDay !== "now") {
+      if (!readTime) {
+        fail("Enter the time you read your balance.", "time");
+        return;
+      }
+      asOf = `${readDay}T${readTime}:00+05:30`;
+      const at = Date.parse(asOf);
+      const now = Date.now();
+      if (at > now) {
+        fail("That time hasn't come yet.", "time");
+        return;
+      }
+      if (now - at > READ_AT_MAX_MS) {
+        fail("Pick a time in the last 7 days.", "time");
+        return;
+      }
     }
     setBusy(true);
     setError(null);
     try {
-      await saveBalance(amount);
+      await saveBalance(amount, asOf);
       setEditing(false);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't save your balance.");
+      fail(err instanceof Error ? err.message : "Couldn't save your balance.");
     } finally {
       setBusy(false);
     }
@@ -165,7 +213,7 @@ function BalanceSection() {
     try {
       await clearBalance();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't remove your balance.");
+      fail(err instanceof Error ? err.message : "Couldn't remove your balance.");
     } finally {
       setBusy(false);
       setConfirmRemove(false);
@@ -179,7 +227,7 @@ function BalanceSection() {
         {showForm ? (
           <form onSubmit={submit} className="p-4" noValidate>
             <label htmlFor="balance-amount" className="text-[15px] font-medium text-ink">
-              How much is in your bank account right now?
+              How much is in your bank accounts?
             </label>
             <div className="relative mt-3">
               <span className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-lg font-semibold text-ink-2" aria-hidden>
@@ -194,16 +242,33 @@ function BalanceSection() {
                 placeholder="1,25,000"
                 value={draft}
                 onChange={(e) => setDraft(e.target.value)}
-                aria-invalid={Boolean(error)}
-                aria-describedby="balance-help"
+                aria-invalid={invalid("amount")}
+                aria-describedby={invalid("amount") ? "balance-help balance-error" : "balance-help"}
                 className="h-13 w-full rounded-2xl border border-line bg-canvas py-3 pr-4 pl-9 text-lg font-semibold text-ink tabular-nums outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
               />
             </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <span className="text-[15px] text-ink">Read at</span>
+              <SelectPill label="Read at" value={readDay} onChange={setReadDay} options={readDays} />
+              {readDay !== "now" ? (
+                <input
+                  type="time"
+                  aria-label="Time you read it"
+                  aria-invalid={invalid("time")}
+                  aria-describedby={invalid("time") ? "balance-error" : undefined}
+                  value={readTime}
+                  onChange={(e) => setReadTime(e.target.value)}
+                  // 16px stops iOS Safari zooming in.
+                  className="h-10 min-w-0 rounded-2xl border border-line bg-canvas px-3 text-base text-ink tabular-nums outline-none focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
+                />
+              ) : null}
+            </div>
             <p id="balance-help" className="mt-2 text-[13px] leading-relaxed text-ink-2">
-              From now on, every debit SMS is subtracted and every credit added. Credit-card spends count when you pay the card bill.
+              HDFC and ICICI together. From the time you read it, every debit SMS is subtracted and every credit added. Credit-card
+              spends count when you pay the card bill.
             </p>
             {error ? (
-              <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+              <p id="balance-error" role="alert" className="mt-2 text-[13px] font-medium text-expense">
                 {error}
               </p>
             ) : null}
@@ -233,10 +298,11 @@ function BalanceSection() {
                   className={`block truncate text-2xl font-bold tracking-tight ${balance.current < 0 ? "text-expense" : "text-ink"}`}
                   fractionClassName="text-ink-2"
                 />
+                <p className="text-[12px] text-ink-2">HDFC and ICICI together</p>
               </div>
             </div>
             <Row label="Starting balance" value={formatMoney(toMinor(balance.opening_balance), balance.currency)} />
-            <Row label="Set on" value={dateTimeLabel(balance.as_of)} />
+            <Row label="Read at" value={dateTimeLabel(balance.as_of)} />
             <Row
               label="Since then"
               value={`−${formatMoney(toMinor(balance.spent), balance.currency, { decimals: false })} · +${formatMoney(toMinor(balance.received), balance.currency, { decimals: false })}`}
@@ -247,6 +313,17 @@ function BalanceSection() {
                 the card bill is paid from your account.
               </p>
             ) : null}
+            <Link
+              href={BALANCE_PAGE}
+              className="flex min-h-16 items-center gap-3.5 px-4 py-3 transition hover:bg-canvas/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet"
+            >
+              <IconTile icon={Scale} color="#8458F5" size="sm" />
+              <span className="min-w-0 flex-1">
+                <span className="block text-[15px] font-medium text-ink">How it&apos;s worked out</span>
+                <span className="block text-[13px] text-ink-2">What was counted and what was left out</span>
+              </span>
+              <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
+            </Link>
             <div className="flex items-center gap-2 p-3">
               <button type="button" onClick={startEditing} className="h-10 rounded-full bg-violet-soft px-4 text-sm font-semibold text-violet-strong">
                 Update balance

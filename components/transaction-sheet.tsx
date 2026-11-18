@@ -361,7 +361,12 @@ function SheetBody({ t }: { t: Txn }) {
               </Row>
               {carriedForward(t) ? <Row label="Counts toward">{monthLabel(t.countsIn)}</Row> : null}
               {t.account_ref ? <Row label="Account">{t.account_ref}</Row> : null}
-              {t.balance !== null ? <Row label="Balance after">{formatMoney(Math.round(t.balance * 100), t.currency)}</Row> : null}
+              {t.balance !== null ? (
+                // The SMS's "Avl Bal": one account's balance, or a card's limit left (never Balance left).
+                <Row label={t.balance_kind === "card" ? "Card limit left in SMS" : t.balance_kind === "bank" ? "Bank balance in SMS" : "Balance in SMS"}>
+                  {formatMoney(Math.round(t.balance * 100), t.currency)}
+                </Row>
+              ) : null}
               {t.reference_id ? (
                 <Row label="Reference">
                   <button

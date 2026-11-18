@@ -1,5 +1,6 @@
 import type {
   Balance,
+  BalanceBreakdown,
   CategoryRule,
   CategoryRuleInput,
   Inbox,
@@ -72,13 +73,19 @@ export const GOOGLE_SIGN_IN_URL = "/api/v1/auth/google";
 
 export const getBalance = () => request<Balance | null>("/api/v1/balance");
 
-/** `amount` is a plain decimal string ("125000.50") so no precision is lost in transit. */
-export const saveBalance = (amount: string) =>
+/**
+ * `amount` is a plain decimal string ("125000.50") so no precision is lost in transit.
+ * `asOf`: when you read it (ISO with offset); omitted = now.
+ */
+export const saveBalance = (amount: string, asOf?: string) =>
   request<Balance>("/api/v1/balance", {
     method: "PUT",
     headers: { Accept: "application/json", "Content-Type": "application/json" },
-    body: JSON.stringify({ amount }),
+    body: JSON.stringify(asOf ? { amount, as_of: asOf } : { amount }),
   });
+
+/** How Balance left is worked out: the start, what was counted and what was left out. 404 when no balance is saved. */
+export const getBalanceBreakdown = () => request<BalanceBreakdown>("/api/v1/balance/breakdown");
 
 export const clearBalance = () => request<{ status: string }>("/api/v1/balance", { method: "DELETE" });
 

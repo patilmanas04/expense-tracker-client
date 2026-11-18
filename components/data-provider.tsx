@@ -87,7 +87,8 @@ interface DataContextValue {
   signOut: () => Promise<void>;
   /** Running bank balance, or null until one is set in Settings. */
   balance: Balance | null;
-  saveBalance: (amount: string) => Promise<void>;
+  /** `asOf` = when you read it (ISO with offset); omitted = now. */
+  saveBalance: (amount: string, asOf?: string) => Promise<void>;
   clearBalance: () => Promise<void>;
   /** Weekly/monthly spend limits, overall, per category and per merchant, with what's been spent; null until loaded. */
   limits: LimitsSummary | null;
@@ -124,6 +125,16 @@ interface DataContextValue {
   undoDelete: () => void;
   /** The last delete: still undoable ("pending"), or "failed" and put back. */
   deletion: Deletion | null;
+  /**
+   * Transactions deleted on screen that the server still has: waiting out Undo, or on their way.
+   * A new list each time one is added or settles (deleted, undone or put back).
+   */
+  deleting: Txn[];
+  /**
+   * Runs the 5-second check now (new and changed transactions, the balance, notifications).
+   * Resolves false without checking when a fetch is already in flight.
+   */
+  pollNow: () => Promise<boolean>;
   dismissDeletion: () => void;
   selected: Txn | null;
   openTransaction: (id: string) => void;
@@ -215,6 +226,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const deletedIds = useRef(new Set<string>()); // so a poll already in flight can't bring one back
   const pendingDelete = useRef<{ txn: Txn; timer: number } | null>(null); // waiting out its undo window
   const [deletion, setDeletion] = useState<Deletion | null>(null);
+  const [deleting, setDeleting] = useState<Txn[]>([]);
+  const settle = useCallback((id: string) => setDeleting((current) => current.filter((t) => t.id !== id)), []);
 
   const apply = useCallback((result: LoadResult, initial: boolean) => {
     if (result.kind === "ok") {
@@ -326,7 +339,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   /** Cheap 5-second check: only rows added or changed since the newest change we have, plus the balance. */
   const poll = useCallback(async () => {
-    if (inFlight.current) return;
+    if (inFlight.current) return false;
     inFlight.current = true;
     try {
       const [fresh, nextBalance, nextInbox] = await Promise.all([
@@ -348,6 +361,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
       setToday(dayKey(Date.now())); // React skips the render when the day hasn't changed
       setError(null);
+      return true;
     } catch (e) {
       if (e instanceof ApiError && e.status === 401) {
         setUser(null);
@@ -356,6 +370,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       } else if (++pollFailures.current >= POLL_FAILURES_BEFORE_ALERT) {
         setError(e instanceof Error ? e.message : "Something went wrong.");
       }
+      return true;
     } finally {
       inFlight.current = false;
       void drainQueued();
@@ -385,6 +400,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
     } finally {
       setUser(null);
       setTxns([]);
+      setDeleting([]);
       setBalance(null);
       setInbox(EMPTY_INBOX);
       setLimits(null);
@@ -394,8 +410,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
-  const saveBalance = useCallback(async (amount: string) => {
-    setBalance(await apiSaveBalance(amount));
+  const saveBalance = useCallback(async (amount: string, asOf?: string) => {
+    setBalance(await apiSaveBalance(amount, asOf));
   }, []);
 
   const clearBalance = useCallback(async () => {
@@ -473,18 +489,20 @@ export function DataProvider({ children }: { children: ReactNode }) {
     (txn: Txn, keepalive = false) => {
       apiDeleteTransaction(txn.id, keepalive).then(
         () => {
+          settle(txn.id); // views showing the server's figures (the balance breakdown) refetch on this
           void reloadBalance();
           void loadLimits();
         },
         () => {
           // Nothing disappears silently: put it back and say so.
+          settle(txn.id);
           deletedIds.current.delete(txn.id);
           setTxns((current) => mergeTransactions(current, [txn]));
           setDeletion({ txn, status: "failed", until: Date.now() + UNDO_MS });
         },
       );
     },
-    [reloadBalance, loadLimits],
+    [reloadBalance, loadLimits, settle],
   );
 
   /** Sends the delete waiting for its undo window right away; true if there was one. */
@@ -508,6 +526,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       deletedIds.current.add(id);
       setSelectedId((current) => (current === id ? null : current));
       setTxns((current) => current.filter((t) => t.id !== id));
+      setDeleting((current) => [...current.filter((t) => t.id !== id), txn]);
       const timer = window.setTimeout(() => {
         if (pendingDelete.current?.txn.id !== id) return;
         flushDelete();
@@ -526,8 +545,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     window.clearTimeout(waiting.timer);
     deletedIds.current.delete(waiting.txn.id);
     setTxns((current) => mergeTransactions(current, [waiting.txn]));
+    settle(waiting.txn.id);
     setDeletion(null);
-  }, []);
+  }, [settle]);
 
   const dismissDeletion = useCallback(() => setDeletion(null), []);
 
@@ -636,6 +656,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       undoDelete,
       deletion,
       dismissDeletion,
+      deleting,
+      pollNow: poll,
       selected: (selectedId && txns.find((t) => t.id === selectedId)) || null,
       openTransaction: setSelectedId,
       closeTransaction,
@@ -682,6 +704,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       undoDelete,
       deletion,
       dismissDeletion,
+      deleting,
+      poll,
       selectedId,
       activityRequest,
     ],

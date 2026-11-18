@@ -80,6 +80,10 @@ export function timeAgo(iso: string, now: number): string {
 const shortDate = new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, day: "numeric", month: "short" });
 export const shortDayLabel = (day: string) => shortDate.format(fromDay(day));
 
+const weekdayDate = new Intl.DateTimeFormat("en-IN", { timeZone: TIME_ZONE, weekday: "short", day: "numeric", month: "short" });
+/** "Mon, 16 Nov" */
+export const weekdayDayLabel = (day: string) => weekdayDate.format(fromDay(day));
+
 /** Days from `from` to `to` inclusive ("YYYY-MM-DD", IST): 12 → 18 Oct is 7. */
 export function daySpan(from: string, to: string): number {
   return Math.round((fromDay(to).getTime() - fromDay(from).getTime()) / 86_400_000) + 1;

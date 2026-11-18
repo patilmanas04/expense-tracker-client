@@ -23,6 +23,8 @@ export interface Transaction {
   updated_at: string;
   /** The earlier transaction this may be a second record of, while you haven't decided; it then counts nowhere. */
   duplicate_of: string | null;
+  /** Whose figure `balance` (the SMS's "Avl Bal") is: a bank account's balance, or a credit card's limit left; null without one. */
+  balance_kind: "bank" | "card" | null;
 }
 
 /** Mirrors `ManualTransactionInput` in the backend's main.py. */
@@ -64,6 +66,28 @@ export interface Balance {
   counted: number;
   /** Credit-card alerts skipped (they hit the account when the bill is paid). */
   excluded_card: number;
+}
+
+/** Why a transaction since the saved balance didn't move Balance left (server: balance.SKIP_REASONS, in this order). */
+export type SkipReason = "unreadable" | "other_currency" | "duplicate" | "cash" | "credit_card";
+
+export interface SkipGroup {
+  count: number;
+  /** Signed decimal string ("-2350.00"): what they'd have changed if counted; null for unreadable and other currency. */
+  total: string | null;
+  /** Oldest first. */
+  ids: string[];
+}
+
+/** Mirrors `BalanceBreakdown` in the backend's balance.py. Amounts are decimal strings. */
+export interface BalanceBreakdown {
+  currency: string;
+  start: { amount: string; as_of: string };
+  /** Oldest first; `effect` is negative for money out, `running` is Balance left after the row. */
+  counted: { id: string; effect: string; running: string }[];
+  skipped: Record<SkipReason, SkipGroup>;
+  /** Equals Balance left. */
+  current: string;
 }
 
 /** Mirrors `LimitsSummary` in the backend's limits.py. */
