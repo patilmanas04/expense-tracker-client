@@ -415,6 +415,15 @@ export function currencies(txns: Txn[]): string[] {
   return [...new Set(txns.filter((t) => t.is_parsed).map((t) => t.currency))].sort();
 }
 
+/**
+ * A merchant name as the server compares names (`categorize.merchant_key`): trimmed, runs of
+ * whitespace as one space, lower case. null when there's no name, or it's "Unknown".
+ */
+export function merchantKey(name: string | null): string | null {
+  const key = (name ?? "").trim().replace(/\s+/g, " ").toLowerCase();
+  return key && key !== "unknown" ? key : null;
+}
+
 export const parsedByLabel = (t: Pick<Transaction, "parsed_by" | "is_parsed">) =>
   !t.is_parsed
     ? "Needs review"
@@ -424,6 +433,7 @@ export const parsedByLabel = (t: Pick<Transaction, "parsed_by" | "is_parsed">) =
           "regex+ai": "Rules + AI category",
           "regex+user": "Rules + your category",
           "regex+history": "Rules + past payments",
+          "regex+rule": "Rules + your category rule",
           ai_agent: "AI parsed",
           manual: "You, by hand",
           edited: "You, from the SMS",

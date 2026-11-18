@@ -172,3 +172,64 @@ export interface User {
   email: string;
   picture: string | null;
 }
+
+/** One merged name: payments named `from_name` (any case) are renamed `to_name`. Mirrors `MerchantNameOut` in the backend's rules.py. */
+export interface MerchantName {
+  id: string;
+  /** The name as it was when merged, e.g. "SWIGGY". */
+  from_name: string;
+  to_name: string;
+  created_at: string;
+}
+
+/** Mirrors `NameSaved` in the backend's rules.py: the merged name and how many payments were renamed. */
+export interface NameSaved {
+  name: MerchantName;
+  /** Payments renamed, the one being edited included. */
+  changed: number;
+}
+
+/** A category rule's conditions and category (all conditions must match). Mirrors `RuleFields` in the backend's rules.py. */
+export interface CategoryRuleInput {
+  /** Words the payment's name must have (whole words, in order, any case); null = any name. */
+  merchant_words: string | null;
+  /** Words the SMS must have; never matches payments added by hand. */
+  sms_words: string | null;
+  /** Decimal string in INR, e.g. "15000" or "15000.50"; at least this much (inclusive). */
+  min_amount: string | null;
+  /** null = money in or out. */
+  direction: TxType | null;
+  category: string;
+}
+
+/** Mirrors `CategoryRuleOut` in the backend's rules.py. */
+export interface CategoryRule extends CategoryRuleInput {
+  id: string;
+  created_at: string;
+}
+
+/** A past payment a rule would change. Mirrors `RuleExample` in the backend's rules.py. */
+export interface RuleExample {
+  id: string;
+  merchant: string | null;
+  /** Decimal string, e.g. "18000.00". */
+  amount: string;
+  currency: string;
+  transaction_time: string;
+  /** Its category today. */
+  category: string | null;
+}
+
+/** Mirrors `RulePreview` in the backend's rules.py: what applying the rule to past payments would change. */
+export interface RulePreview {
+  count: number;
+  /** Up to 5, newest first. */
+  examples: RuleExample[];
+}
+
+/** Mirrors `RuleSaved` in the backend's rules.py. */
+export interface RuleSaved {
+  rule: CategoryRule;
+  /** Past payments changed (0 unless applied to past payments). */
+  changed: number;
+}

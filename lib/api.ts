@@ -1,12 +1,18 @@
 import type {
   Balance,
+  CategoryRule,
+  CategoryRuleInput,
   Inbox,
   KnownMerchant,
   LimitsInput,
   LimitsSummary,
   MerchantLimitInput,
+  MerchantName,
   MerchantPreview,
+  NameSaved,
   NewTransaction,
+  RulePreview,
+  RuleSaved,
   Transaction,
   TransactionPatch,
   User,
@@ -154,6 +160,51 @@ export const deleteTransaction = (id: string, keepalive = false) =>
 /** "Not a duplicate": the transaction counts again and is never flagged again. 409 when it isn't a pending duplicate. */
 export const markNotDuplicate = (id: string) =>
   request<Transaction>(`/api/v1/transactions/${id}/not-duplicate`, { method: "POST" });
+
+const JSON_HEADERS = { Accept: "application/json", "Content-Type": "application/json" };
+
+/** Merged names, newest first. */
+export const getMerchantNames = () => request<MerchantName[]>("/api/v1/merchant-names");
+
+/** Renames every payment named `from_name` (any case), this one included, and future ones, to `to_name`. */
+export const mergeMerchantName = (from_name: string, to_name: string) =>
+  request<NameSaved>("/api/v1/merchant-names", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ from_name, to_name }),
+  });
+
+/** Stops renaming future payments; names already changed stay. */
+export const deleteMerchantName = (id: string) => request<void>(`/api/v1/merchant-names/${id}`, { method: "DELETE" });
+
+/** Category rules, newest first (the newest rule that matches wins). */
+export const getRules = () => request<CategoryRule[]>("/api/v1/rules");
+
+/** Which past payments the rule would change; writes nothing. With `id`, the rule takes that saved rule's place. */
+export const previewRule = ({ id, ...input }: CategoryRuleInput & { id?: string }) =>
+  request<RulePreview>("/api/v1/rules/preview", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(id ? { ...input, id } : input),
+  });
+
+export const createRule = (input: CategoryRuleInput, apply_to_past: boolean) =>
+  request<RuleSaved>("/api/v1/rules", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ ...input, apply_to_past }),
+  });
+
+/** Replaces every field of the rule. */
+export const updateRule = (id: string, input: CategoryRuleInput, apply_to_past: boolean) =>
+  request<RuleSaved>(`/api/v1/rules/${id}`, {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ ...input, apply_to_past }),
+  });
+
+/** Categories the rule set stay. */
+export const deleteRule = (id: string) => request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
 
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 

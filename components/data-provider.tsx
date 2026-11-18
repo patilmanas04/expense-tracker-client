@@ -67,6 +67,10 @@ interface DataContextValue {
   currency: string;
   setCurrency: (currency: string) => void;
   currencies: string[];
+  /**
+   * Reloads every transaction. Asked for while a poll (or another reload) is in flight, it runs right
+   * after it, never dropped: `await refresh()` resolves only after the reload.
+   */
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
   /** Running bank balance, or null until one is set in Settings. */
@@ -220,9 +224,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setRefreshing(false);
   }, []);
 
-  const load = useCallback(
+  /** One full reload; the caller has checked nothing else is in flight. */
+  const fetchAll = useCallback(
     async (initial: boolean) => {
-      if (inFlight.current) return;
       inFlight.current = true;
       setRefreshing(true);
       const result = await fetchEverything();
@@ -230,6 +234,27 @@ export function DataProvider({ children }: { children: ReactNode }) {
       apply(result, initial);
     },
     [apply],
+  );
+
+  // Reloads asked for while a fetch was in flight; all of them are served by one reload as soon as it ends.
+  const queued = useRef<(() => void)[]>([]);
+
+  const drainQueued = useCallback(async () => {
+    // Whatever is in flight drains the queue when it ends.
+    while (queued.current.length && !inFlight.current) {
+      const waiting = queued.current.splice(0);
+      await fetchAll(false);
+      waiting.forEach((resolve) => resolve());
+    }
+  }, [fetchAll]);
+
+  const load = useCallback(
+    async (initial: boolean) => {
+      if (inFlight.current) return new Promise<void>((resolve) => queued.current.push(resolve));
+      await fetchAll(initial);
+      await drainQueued();
+    },
+    [fetchAll, drainQueued],
   );
 
   // Optional, like the balance: a failure keeps the last value and never blocks the dashboard.
@@ -248,13 +273,14 @@ export function DataProvider({ children }: { children: ReactNode }) {
     void fetchEverything().then((result) => {
       inFlight.current = false;
       if (!cancelled) apply(result, true);
+      void drainQueued();
     });
     // In parallel, so Settings opens with the meters already filled in.
     void loadLimits();
     return () => {
       cancelled = true;
     };
-  }, [apply, loadLimits]);
+  }, [apply, loadLimits, drainQueued]);
 
   // New SMS change what's been spent: refresh the meters (the first load already has them).
   useEffect(() => {
@@ -312,8 +338,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     } finally {
       inFlight.current = false;
+      void drainQueued();
     }
-  }, []);
+  }, [drainQueued]);
 
   // Poll while the app is open and visible; hidden tabs and locked phones don't poll.
   useEffect(() => {

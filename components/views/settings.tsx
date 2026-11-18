@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronRight, Gauge, Landmark, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
+import { ChevronRight, Gauge, Landmark, ListChecks, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
 import Link from "next/link";
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 
@@ -12,6 +12,7 @@ import { POLL_INTERVAL_MS, useData } from "../data-provider";
 import { useTheme, type Theme } from "../theme";
 import { Amount, Avatar, Card, IconTile, Segmented, SelectPill } from "../ui";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
+import { RULES_PAGE } from "./rules";
 
 export function SettingsView() {
   const { user, txns, currency, setCurrency, currencies, refresh, refreshing, signOut, requestActivity } = useData();
@@ -42,6 +43,8 @@ export function SettingsView() {
       <BalanceSection />
 
       <LimitsSection />
+
+      <RulesSection />
 
       <EmailAlertsSection />
 
@@ -293,6 +296,27 @@ function LimitsSection() {
             <span className="block truncate text-[13px] text-ink-2">
               {count ? `${count} ${count === 1 ? "limit" : "limits"} set` : "Overall, per category or per merchant"}
             </span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
+        </Link>
+      </Card>
+    </section>
+  );
+}
+
+/** The way into merged names and category rules (a page of its own). */
+function RulesSection() {
+  return (
+    <section id="rules" className="mt-3 scroll-mt-6">
+      <Card className="overflow-hidden">
+        <Link
+          href={RULES_PAGE}
+          className="flex min-h-16 items-center gap-3.5 px-4 py-3 transition hover:bg-canvas/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet"
+        >
+          <IconTile icon={ListChecks} color="#8458F5" size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="block text-[15px] font-medium text-ink">Names and rules</span>
+            <span className="block text-[13px] text-ink-2">Merge merchant names, set categories by rule</span>
           </span>
           <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
         </Link>

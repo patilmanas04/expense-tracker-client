@@ -57,6 +57,7 @@ export function TransactionFields({
   autoCategory = false,
   showPaidWith = false,
   categoryHint,
+  merchantNote,
 }: {
   idPrefix: string;
   draft: Draft;
@@ -67,6 +68,8 @@ export function TransactionFields({
   autoCategory?: boolean;
   showPaidWith?: boolean;
   categoryHint?: string | null;
+  /** Shown under the name field, e.g. the transaction sheet's "Also rename …" box. */
+  merchantNote?: ReactNode;
 }) {
   const debit = draft.type === "DEBIT";
   return (
@@ -110,6 +113,7 @@ export function TransactionFields({
           onChange={(e) => onChange({ merchant: e.target.value })}
           className={FIELD}
         />
+        {merchantNote}
       </Field>
 
       <Field id={`${idPrefix}-category`} label="Category">

@@ -1,10 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { Check, ChevronRight, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
-import { carriedForward, isHeldOut, parsedByLabel, type Txn } from "@/lib/analytics";
+import { carriedForward, isHeldOut, merchantKey, parsedByLabel, type Txn } from "@/lib/analytics";
+import { mergeMerchantName } from "@/lib/api";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
 import { dateTimeLabel, formatMoney, monthLabel, shortDayLabel, timeLabel } from "@/lib/format";
 import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
@@ -14,7 +16,8 @@ import { useData } from "./data-provider";
 import { useSheetDrag } from "./sheet-drag";
 import { TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 import { TagChips, transactionTitle } from "./transactions";
-import { Amount, CategoryTile, cx } from "./ui";
+import { Amount, CategoryTile, CheckRow, cx } from "./ui";
+import { RULES_PAGE } from "./views/rules";
 
 /** iOS navigation-bar capsule: "Edit", "Cancel", "Done". */
 const CAPSULE =
@@ -42,7 +45,7 @@ function draftOf(t: Txn): Draft {
 }
 
 function SheetBody({ t }: { t: Txn }) {
-  const { closeTransaction, updateTransaction, deleteTransaction } = useData();
+  const { closeTransaction, updateTransaction, deleteTransaction, refresh, txns } = useData();
   const dialogRef = useRef<HTMLDivElement>(null);
   const { backdropRef, grabProps } = useSheetDrag(dialogRef, closeTransaction);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -54,6 +57,7 @@ function SheetBody({ t }: { t: Txn }) {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [kept, setKept] = useState(false); // "Not a duplicate" just succeeded
+  const [mergeAll, setMergeAll] = useState(false); // "Also rename the other payments named …"
   const editing = draft !== null;
   const editingRef = useRef(false);
   const debit = t.type === "DEBIT";
@@ -118,15 +122,33 @@ function SheetBody({ t }: { t: Txn }) {
     setDraft(draftOf(t));
     setError(null);
     setKept(false); // said once; don't repeat it on the way back from Edit
+    setMergeAll(false);
   };
   const cancelEditing = () => {
     setDraft(null);
     setError(null);
+    setMergeAll(false);
   };
   const change = (patch: Partial<Draft>) => {
     setDraft((current) => (current ? { ...current, ...patch } : current));
     setError(null);
   };
+
+  // A new name for a payment that has one offers to rename every payment with the old name (any case).
+  const fromKey = merchantKey(t.merchant);
+  const typed = draft?.merchant.trim() ?? "";
+  const renaming = draft !== null && fromKey !== null && typed !== "" && typed !== draftOf(t).merchant;
+  // Other loaded payments with the same name (as the server compares names) that aren't already the new name.
+  const others = useMemo(() => {
+    if (!renaming) return 0;
+    const target = typed.normalize("NFC").replace(/\s+/g, " ");
+    return txns.filter((o) => o.id !== t.id && merchantKey(o.merchant) === fromKey && o.merchant !== target).length;
+  }, [renaming, typed, txns, t.id, fromKey]);
+  const quoted = `“${t.merchant ?? ""}”`;
+  const mergeText =
+    others === 0
+      ? `Also rename future payments named ${quoted} (any case)`
+      : `Also rename the ${others} other ${others === 1 ? "payment" : "payments"} named ${quoted} (any case), and future ones`;
 
   // Sends only what changed.
   const save = async () => {
@@ -142,6 +164,7 @@ function SheetBody({ t }: { t: Txn }) {
     if (draft.when !== original.when) patch.transaction_time = checked.time.toISOString();
     if (manual && draft.paidWith !== original.paidWith) patch.paid_with = draft.paidWith;
     if (Object.keys(patch).length === 0) return cancelEditing();
+    if (renaming && mergeAll && t.merchant) return saveMerged(t.merchant, checked.merchant, patch);
     setSaving(true);
     setError(null);
     try {
@@ -154,13 +177,52 @@ function SheetBody({ t }: { t: Txn }) {
     }
   };
 
+  /**
+   * Renames every payment named `from` (this one included) and future ones, then sends the other
+   * changed fields, then reloads every transaction. "Saving…" stays until the reload is done.
+   */
+  const saveMerged = async (from: string, to: string, patch: TransactionPatch) => {
+    setSaving(true);
+    setError(null);
+    try {
+      try {
+        await mergeMerchantName(from, to);
+      } catch (err) {
+        setError(err instanceof Error ? err.message : "Couldn't rename these payments.");
+        return;
+      }
+      const rest = { ...patch };
+      delete rest.merchant; // the merge renamed this payment too
+      let saved = true;
+      if (Object.keys(rest).length) {
+        try {
+          await updateTransaction(t.id, rest);
+        } catch (err) {
+          saved = false;
+          setError(err instanceof Error ? err.message : "Couldn't save your other changes.");
+        }
+      }
+      await refresh();
+      if (saved) {
+        setDraft(null);
+        setMergeAll(false);
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const name = draft?.merchant.trim() || t.merchant || "";
-  const categoryHint =
-    draft && draft.category !== categoryName(t) && name
-      ? draft.category === UNCATEGORIZED
-        ? `Folio will pick categories for ${name} itself again.`
-        : `${draft.type === "DEBIT" ? "Future payments to" : "Future money from"} ${name} will be ${draft.category} too.`
-      : null;
+  const recategorised = draft !== null && draft.category !== categoryName(t);
+  const categoryHint = !recategorised
+    ? null
+    : t.parsed_by === "regex+rule" // a category rule set it: the rule, not this edit, decides future payments
+      ? "Changes this payment only. Future payments like this follow your category rule."
+      : !name
+        ? null
+        : draft.category === UNCATEGORIZED
+          ? `Folio will pick categories for ${name} itself again.`
+          : `${draft.type === "DEBIT" ? "Future payments to" : "Future money from"} ${name} will be ${draft.category} too.`;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center sm:items-center sm:p-6">
@@ -222,6 +284,13 @@ function SheetBody({ t }: { t: Txn }) {
               maxWhen={localInputValue(openedAt + 5 * 60_000)}
               showPaidWith={manual}
               categoryHint={categoryHint}
+              merchantNote={
+                renaming ? (
+                  <CheckRow checked={mergeAll} onChange={setMergeAll} disabled={saving}>
+                    {mergeText}
+                  </CheckRow>
+                ) : null
+              }
             />
             {error ? (
               <p role="alert" className="mt-3 text-[13px] font-medium text-expense">
@@ -274,7 +343,22 @@ function SheetBody({ t }: { t: Txn }) {
 
             <dl className="divide-y divide-line rounded-card border border-line/70 bg-surface px-4 shadow-card">
               <Row label="Type">{debit ? "Money out" : "Money in"}</Row>
-              <Row label="Category">{categoryName(t)}</Row>
+              <Row
+                label="Category"
+                note={
+                  t.parsed_by === "regex+rule" ? (
+                    <>
+                      Set by one of your category rules. Future payments like this follow it.{" "}
+                      {/* The sheet sits in the app shell: close it, or it stays open over the rules page. */}
+                      <Link href={RULES_PAGE} onClick={closeTransaction} className="font-medium text-violet-strong">
+                        Names and rules
+                      </Link>
+                    </>
+                  ) : null
+                }
+              >
+                {categoryName(t)}
+              </Row>
               {carriedForward(t) ? <Row label="Counts toward">{monthLabel(t.countsIn)}</Row> : null}
               {t.account_ref ? <Row label="Account">{t.account_ref}</Row> : null}
               {t.balance !== null ? <Row label="Balance after">{formatMoney(Math.round(t.balance * 100), t.currency)}</Row> : null}
@@ -562,11 +646,13 @@ function OriginalSms({ text }: { text: string }) {
   );
 }
 
-function Row({ label, children }: { label: string; children: ReactNode }) {
+/** A detail line; `note` adds a full-width line under it (a second <dd>, still valid list markup). */
+function Row({ label, children, note }: { label: string; children: ReactNode; note?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-4 py-3.5">
+    <div className={note ? "flex flex-wrap items-center justify-between gap-x-4 py-3.5" : "flex items-center justify-between gap-4 py-3.5"}>
       <dt className="shrink-0 text-sm text-ink-2">{label}</dt>
       <dd className="min-w-0 truncate text-right text-sm font-medium text-ink">{children}</dd>
+      {note ? <dd className="mt-1 w-full text-left text-[13px] font-normal whitespace-normal text-ink-2">{note}</dd> : null}
     </div>
   );
 }

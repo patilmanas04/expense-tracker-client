@@ -310,3 +310,34 @@ export function ProgressBar({ value, color, label }: { value: number; color: str
     </div>
   );
 }
+
+/** A native checkbox in a soft row; the label text wraps. */
+export function CheckRow({
+  checked,
+  onChange,
+  disabled = false,
+  children,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  disabled?: boolean;
+  children: ReactNode;
+}) {
+  return (
+    <label
+      className={cx(
+        "mt-2 flex items-start gap-3 rounded-2xl bg-track px-4 py-3 text-[14px] text-ink",
+        disabled ? "opacity-60" : "cursor-pointer",
+      )}
+    >
+      <input
+        type="checkbox"
+        checked={checked}
+        disabled={disabled}
+        onChange={(e) => onChange(e.target.checked)}
+        className="mt-0.5 size-5 shrink-0 accent-violet"
+      />
+      <span className="min-w-0 break-words">{children}</span>
+    </label>
+  );
+}
