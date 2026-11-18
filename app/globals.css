@@ -129,7 +129,7 @@ body {
 /* Home's content sheet slides up over the pinned violet header on phones, and its top corners
    square off as its top nears the top of the screen: 32px while it's 80px or more below, 0 once
    it gets there. The radius is a registered property so it can be animated; the sheet's own
-   `rounded-t-(--home-radius)` reads it, which leaves `lg:rounded-none` in charge on desktop.
+   `rounded-t-[var(--home-radius,32px)]` reads it (32px if the rule is ever missing), which leaves `lg:rounded-none` in charge on desktop.
    Browsers with scroll-driven animations do it here; the others (iOS 18 and older, Firefox) get
    the same values from useSheetCorners. Keep 32 and 80 in sync with components/home-sheet-corners.ts. */
 @property --home-radius {

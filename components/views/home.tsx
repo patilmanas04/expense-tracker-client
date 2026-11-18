@@ -109,7 +109,7 @@ export function HomeView() {
               scrolls; its top corners square off as it reaches the top (see home-sheet-corners.ts) */}
           <div
             ref={sheetRef}
-            className="home-sheet relative z-10 -mt-9 rounded-t-(--home-radius) bg-canvas px-4 pt-6 sm:px-6 lg:z-auto lg:mt-6 lg:rounded-none lg:bg-transparent lg:px-0 lg:pt-0"
+            className="home-sheet relative z-10 -mt-9 rounded-t-[var(--home-radius,32px)] bg-canvas px-4 pt-6 sm:px-6 lg:z-auto lg:mt-6 lg:rounded-none lg:bg-transparent lg:px-0 lg:pt-0"
           >
             <SectionHeader
               title="Your Money"
