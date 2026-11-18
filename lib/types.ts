@@ -239,4 +239,6 @@ export interface Settings {
   /** Whole rupees; null = Off. */
   "alerts.large_amount": number | null;
   "alerts.unusual": boolean;
+  /** Warn once when a spend limit is this full: 50–95 in steps of 5; null = Off. Default 80. */
+  "limits.warn_percent": number | null;
 }

@@ -21,6 +21,7 @@ const OLD_LIMITS_PATH = "/settings#limits";
 /** Icon and colour per notification kind; later designs add one entry each. */
 const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
   spend_limit: { icon: Gauge, color: "#FF6F4F" },
+  spend_warning: { icon: Gauge, color: "#F79009" },
   duplicate: { icon: Copy, color: "#EDA100" },
   payment_alert: { icon: BadgeAlert, color: "#F04438" },
 };

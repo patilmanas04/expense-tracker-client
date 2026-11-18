@@ -171,6 +171,10 @@ export const getSettings = () => request<Settings>("/api/v1/settings");
 export const saveSettings = (changes: Partial<Settings>) =>
   request<Settings>("/api/v1/settings", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(changes) });
 
+/** A settings 422 without its "<key>: " prefix, or `fallback` for anything that isn't an Error. */
+export const settingError = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message.replace(/^[a-z0-9_.]+: /, "") : fallback;
+
 /** Merged names, newest first. */
 export const getMerchantNames = () => request<MerchantName[]>("/api/v1/merchant-names");
 

@@ -13,7 +13,8 @@ import {
   type Ref,
 } from "react";
 
-import { getKnownMerchants, previewMerchant } from "@/lib/api";
+import { leftToSpend, type LeftToSpend } from "@/lib/analytics";
+import { getKnownMerchants, previewMerchant, settingError } from "@/lib/api";
 import { ALL_SPENDING, LIMIT_CATEGORIES, PALETTE } from "@/lib/categories";
 import { formatMoney, formatPercent, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
 import { cameFromApp } from "@/lib/nav-history";
@@ -22,7 +23,7 @@ import type { KnownMerchant, LimitsSummary, MerchantLimitStatus, MerchantPreview
 import { useData } from "../data-provider";
 import { useSheetDrag } from "../sheet-drag";
 import { SwipeToDelete } from "../swipe-to-delete";
-import { Card, CategoryTile, cx, IconTile, ProgressBar, Segmented } from "../ui";
+import { Card, CategoryTile, cx, IconTile, ProgressBar, Segmented, SelectPill } from "../ui";
 
 export const LIMITS_PAGE = "/settings/limits";
 
@@ -32,6 +33,11 @@ const SUGGESTIONS = 8;
 const PREVIEW_DELAY_MS = 300;
 /** Longest merchant name the server takes. */
 const MERCHANT_MAX = 255;
+/** "Warn me at" levels: Off, or 50% to 95% in steps of 5 (server: settings_store, limits.warn_percent). */
+const WARN_OPTIONS = [
+  { value: "off", label: "Off" },
+  ...Array.from({ length: 10 }, (_, i) => ({ value: String(50 + i * 5), label: `${50 + i * 5}%` })),
+];
 
 type Kind = "category" | "merchant";
 
@@ -151,8 +157,11 @@ export function LimitsView() {
 
       <h1 className="pt-2 text-[28px] font-bold tracking-tight text-ink lg:text-3xl">Spending limits</h1>
       <p className="mt-1 text-[14px] leading-relaxed text-ink-2">
-        Reaching a limit sends one notification under the bell on Home, once per week (Mon–Sun) or month.
+        Reaching a limit sends one notification under the bell on Home, once per week (Mon–Sun) or month. You&apos;re
+        warned once before that, at the level below.
       </p>
+
+      <WarnLevelCard />
 
       {summary ? (
         <>
@@ -894,8 +903,74 @@ function LimitGroup({
   );
 }
 
+/** "Warn me at": one notification when a limit is this full; saved as soon as it's picked. */
+function WarnLevelCard() {
+  const { settings, saveSettings } = useData();
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  if (!settings) {
+    return (
+      <Card className="mt-5 p-4">
+        <p className="text-[13px] text-ink-2">Warnings aren&apos;t available right now. Tap Sync in Settings to try again.</p>
+      </Card>
+    );
+  }
+
+  const saved = settings["limits.warn_percent"];
+  const shown = pending ?? (saved === null ? "off" : String(saved));
+
+  const choose = async (value: string) => {
+    setPending(value);
+    setError(null);
+    try {
+      await saveSettings({ "limits.warn_percent": value === "off" ? null : Number(value) });
+    } catch (err) {
+      setError(settingError(err, "Couldn't save this setting."));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  return (
+    <Card className="mt-5 p-4">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] text-ink">Warn me at</p>
+          <p className="text-[13px] text-ink-2">One notification when a limit is this full, before it&apos;s reached.</p>
+        </div>
+        <SelectPill
+          label="Warn me at"
+          size="sm"
+          value={shown}
+          onChange={(value) => void choose(value)}
+          options={WARN_OPTIONS}
+          className="shrink-0"
+        />
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+/** "₹850 left · about ₹85 a day for 10 days", "₹120 over" (whole rupees; see leftToSpend). */
+function paceText(pace: LeftToSpend, currency: string) {
+  const money = (minor: number) => formatMoney(minor, currency, { decimals: false });
+  if (pace.kind === "over") return `${money(pace.overMinor)} over`;
+  if (pace.leftMinor === 0) return "Nothing left";
+  const left = `${money(pace.leftMinor)} left`;
+  if (pace.days === null || pace.perDayMinor === null) return left;
+  if (pace.days === 1) return `${left} · today is the last day`;
+  return `${left} · about ${money(pace.perDayMinor)} a day for ${pace.days} days`;
+}
+
 /** Spent this week or month, against its limit when there is one. */
 export function LimitMeter({ title, period, currency }: { title: string; period: PeriodLimit; currency: string }) {
+  const { today, settings } = useData();
   const range = `${shortDayLabel(period.start)} – ${shortDayLabel(period.end)}`;
   const spent = formatMoney(toMinor(period.spent), currency);
   if (period.limit === null) {
@@ -912,7 +987,11 @@ export function LimitMeter({ title, period, currency }: { title: string; period:
     );
   }
   const ratio = period.spent / period.limit;
-  const color = ratio >= 1 ? "#D14429" : ratio >= 0.8 ? "#EDA100" : "#8458F5";
+  // Amber from the warning level (80% when warnings are Off or settings haven't loaded).
+  const warnAt = (settings?.["limits.warn_percent"] ?? 80) / 100;
+  const color = ratio >= 1 ? "#D14429" : ratio >= warnAt ? "#EDA100" : "#8458F5";
+  const pace = leftToSpend(toMinor(period.limit), toMinor(period.spent), period.start, period.end, today);
+  const over = pace.kind === "over";
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
@@ -928,6 +1007,9 @@ export function LimitMeter({ title, period, currency }: { title: string; period:
       <div className="mt-2">
         <ProgressBar value={ratio} color={color} label={`${title}: ${formatPercent(ratio)} of limit`} />
       </div>
+      <p className={cx("mt-1.5 text-[13px]", over ? "font-medium text-expense" : "text-ink-2")}>
+        {paceText(pace, currency)}
+      </p>
     </div>
   );
 }

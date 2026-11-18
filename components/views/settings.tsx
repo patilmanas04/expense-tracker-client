@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 
 import { needsReview } from "@/lib/analytics";
+import { settingError } from "@/lib/api";
 import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, toMinor } from "@/lib/format";
 
 import { FolioMark } from "../brand";
@@ -270,10 +271,6 @@ function BalanceSection() {
     </section>
   );
 }
-
-/** The server's message without its "<key>: " prefix (a 422 names the setting it's about). */
-const settingError = (err: unknown, fallback: string) =>
-  err instanceof Error ? err.message.replace(/^[a-z0-9_.]+: /, "") : fallback;
 
 const LARGE_AMOUNT_MAX = 10_000_000;
 const LARGE_AMOUNT_HELP = "Enter a whole number of rupees from 1 to 1,00,00,000.";

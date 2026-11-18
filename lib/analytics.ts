@@ -391,6 +391,25 @@ export function spendingPace(txns: Txn[], month: string, currency: string, today
   return { spent, lastMonthTotal, projected: Math.round((spent / day) * days), day, days, previousMonth };
 }
 
+/**
+ * What's left of a limit for its period: (limit − spent) ÷ days left including today, rounded down to whole
+ * rupees. Days count from `today` to the period's last day, both included; null when `today` is unknown ("") or
+ * outside start…end (a stale summary). Amounts in minor units; left rounded down, over rounded up, to whole rupees.
+ */
+export type LeftToSpend =
+  | { kind: "left"; leftMinor: number; perDayMinor: number | null; days: number | null }
+  | { kind: "over"; overMinor: number };
+
+export function leftToSpend(limitMinor: number, spentMinor: number, start: string, end: string, today: string): LeftToSpend {
+  const diff = limitMinor - spentMinor;
+  if (diff < 0) return { kind: "over", overMinor: Math.ceil(-diff / 100) * 100 };
+  const leftMinor = Math.floor(diff / 100) * 100;
+  // "YYYY-MM-DD" strings compare in date order.
+  const days = today && start <= today && today <= end ? daySpan(today, end) : null;
+  const perDayMinor = days ? Math.floor(leftMinor / 100 / days) * 100 : null;
+  return { kind: "left", leftMinor, perDayMinor, days };
+}
+
 export interface Insight {
   text: string;
   tone: "good" | "bad" | "neutral";
