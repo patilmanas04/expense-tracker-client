@@ -1,21 +1,32 @@
 "use client";
 
 import { CalendarDays, Check, Download, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
-import { counts, needsReview, tripSummary, type Txn } from "@/lib/analytics";
+import { counts, groupByDay, needsReview, tripSummary, type Txn } from "@/lib/analytics";
 import { categoryMeta, categoryName } from "@/lib/categories";
 import { transactionsCsv } from "@/lib/csv";
 import { fileName, type ExportFilters } from "@/lib/csv-format";
-import { dayKey, dayRangeLabel, formatMoney, monthLabel, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
+import {
+  dayKey,
+  dayRangeLabel,
+  formatMoney,
+  monthLabel,
+  monthOf,
+  parseAmountInput,
+  shiftMonth,
+  shortDayLabel,
+  toMinor,
+} from "@/lib/format";
 import { saveFile } from "@/lib/save-file";
 import { allTags, tagQuery } from "@/lib/tags";
 
 import { AddTransactionSheet } from "../add-transaction";
+import { CalendarGrid } from "../calendar-grid";
 import { useData, type KindFilter } from "../data-provider";
 import { MoreFiltersSheet } from "../more-filters-sheet";
 import { TransactionGroups } from "../transactions";
-import { Card, IconButton, SelectPill, cx } from "../ui";
+import { Card, IconButton, Segmented, SelectPill, cx } from "../ui";
 
 const PAGE = 50;
 const ALL = "ALL";
@@ -63,6 +74,57 @@ function exportPeriod(period: string, day: string, range: DayRange, today: strin
     default:
       return { month: period };
   }
+}
+
+/**
+ * The calendar's month: a month period's own month; a picked day's month (today's until one is picked); a
+ * range's start month (else its end's, else today's); the current month for All time, Today and Yesterday.
+ */
+function calendarMonthFor(period: string, day: string, range: DayRange, today: string): string {
+  switch (period) {
+    case ALL:
+    case TODAY:
+    case YESTERDAY:
+      return monthOf(today);
+    case ON_DAY:
+      return monthOf(day || today);
+    case RANGE:
+      return monthOf(range.from ?? range.to ?? today);
+    default:
+      return period;
+  }
+}
+
+/** List or Calendar, remembered for the visit (sessionStorage); memory only where storage throws. */
+type View = "list" | "calendar";
+const VIEW_KEY = "folio.activity.view";
+const viewListeners = new Set<() => void>();
+let viewMemory: View | null = null; // when sessionStorage is unavailable
+
+function subscribeView(listener: () => void) {
+  viewListeners.add(listener);
+  return () => {
+    viewListeners.delete(listener);
+  };
+}
+
+function readView(): View {
+  if (viewMemory) return viewMemory;
+  try {
+    return sessionStorage.getItem(VIEW_KEY) === "calendar" ? "calendar" : "list";
+  } catch {
+    return "list";
+  }
+}
+
+function writeView(view: View) {
+  viewMemory = view;
+  try {
+    sessionStorage.setItem(VIEW_KEY, view);
+  } catch {
+    // private mode: memory only
+  }
+  for (const listener of viewListeners) listener();
 }
 
 /** What's typed in More filters' amount boxes ("2,000.50"), as typed. */
@@ -114,8 +176,12 @@ interface ActiveFilters {
 
 /** Every filter applies together (AND). `haystack` is the row's `searchText`. */
 function matches(t: Txn, f: ActiveFilters, haystack: string) {
+  return inPeriod(t, f.period, f.day, f.range, f.today, f.yesterday) && matchesExceptPeriod(t, f, haystack);
+}
+
+/** Every filter but the period: the calendar picks its own month. Doc 12's refund kind lands here, so the calendar gets it too. */
+function matchesExceptPeriod(t: Txn, f: ActiveFilters, haystack: string) {
   return (
-    inPeriod(t, f.period, f.day, f.range, f.today, f.yesterday) &&
     (f.kind === "ALL" || (f.kind === "REVIEW" ? needsReview(t) : t.is_parsed && t.type === f.kind)) &&
     (f.category === ALL || (t.is_parsed && categoryName(t) === f.category)) &&
     (!f.tag || t.tags.includes(f.tag)) &&
@@ -216,10 +282,27 @@ export function ActivityView() {
 
   const reviewCount = useMemo(() => txns.filter(needsReview).length, [txns]);
 
-  const filtered = useMemo(
-    () => txns.filter((t) => matches(t, filters, searchable.get(t.id) ?? "")),
+  const filteredExceptPeriod = useMemo(
+    () => txns.filter((t) => matchesExceptPeriod(t, filters, searchable.get(t.id) ?? "")),
     [txns, filters, searchable],
   );
+  const filtered = useMemo(
+    () => filteredExceptPeriod.filter((t) => inPeriod(t, period, day, range, today, yesterday)),
+    [filteredExceptPeriod, period, day, range, today, yesterday],
+  );
+
+  const view = useSyncExternalStore(subscribeView, readView, () => "list" as View);
+  const calMonth = today ? calendarMonthFor(period, day, range, today) : "";
+  // doc 14 switches t.month to t.period here.
+  const calDays = useMemo(
+    () => (view === "calendar" && calMonth ? groupByDay(filteredExceptPeriod.filter((t) => t.month === calMonth), currency) : []),
+    [view, calMonth, filteredExceptPeriod, currency],
+  );
+  const oldestMonth = months[months.length - 1] ?? calMonth;
+  const canPrev = !!calMonth && calMonth > oldestMonth;
+  const canNext = !!today && calMonth < monthOf(today);
+  // An arrow can land on a month with no data; the Period menu still lists it then.
+  const monthOptions = /^\d{4}-\d{2}$/.test(period) && !months.includes(period) ? [...months, period].sort().reverse() : months;
 
   // The confirmation under the header fades after a few seconds.
   useEffect(() => {
@@ -253,7 +336,7 @@ export function ActivityView() {
     );
     observer.observe(sentinel);
     return () => observer.disconnect();
-  }, [filtered.length]);
+  }, [filtered.length, view]); // back from Calendar, the sentinel is a new element
 
   const resetFilters = () => {
     setQuery("");
@@ -277,6 +360,19 @@ export function ActivityView() {
       // not supported here: the calendar button next to the menu opens it
     }
   };
+  // The calendar's arrows move Activity's month, so List and Calendar always show the same one.
+  const moveMonth = (delta: -1 | 1) => {
+    setPeriod(shiftMonth(calMonth, delta));
+    setVisible(PAGE);
+  };
+  // Tapping a day lists it.
+  const pickDay = (d: string) => {
+    setDay(d);
+    setPeriod(ON_DAY);
+    setVisible(PAGE);
+    writeView("list");
+  };
+
   const filtersActive =
     query ||
     kind !== "ALL" ||
@@ -435,7 +531,7 @@ export function ActivityView() {
             { value: YESTERDAY, label: "Yesterday" },
             { value: ON_DAY, label: period === ON_DAY && day ? `On ${shortDayLabel(day)}` : "Pick a date…" },
             { value: RANGE, label: period === RANGE ? rangeLabel(range) : "Date range…" },
-            ...months.map((m) => ({ value: m, label: monthLabel(m) })),
+            ...monthOptions.map((m) => ({ value: m, label: monthLabel(m) })),
           ]}
         />
         {/* The date for "Pick a date". Always in the page so the menu can open its picker. */}
@@ -532,70 +628,99 @@ export function ActivityView() {
         </div>
       ) : null}
 
-      {filtered.length > 0 ? (
-        <div className="mt-5 grid grid-cols-2 gap-3">
-          <Card className="px-4 py-3">
-            <p className="text-xs text-ink-2">Spent</p>
-            <p className="mt-0.5 truncate text-lg font-semibold text-ink tabular-nums">{formatMoney(summary.spent, currency)}</p>
-          </Card>
-          <Card className="px-4 py-3">
-            <p className="text-xs text-ink-2">Received</p>
-            <p className="mt-0.5 truncate text-lg font-semibold text-income tabular-nums">{formatMoney(summary.received, currency)}</p>
-          </Card>
-        </div>
-      ) : null}
+      <Segmented
+        label="View"
+        className="mt-4 sm:max-w-xs"
+        value={view}
+        onChange={writeView}
+        options={[
+          { value: "list", label: "List" },
+          { value: "calendar", label: "Calendar" },
+        ]}
+      />
 
-      {filtered.length > 0 && trip && tripTag ? (
-        <Card className="mt-3 px-4 py-3">
-          <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink">
-            <Hash size={14} className="shrink-0 text-violet-strong" aria-hidden />
-            <span className="sr-only">Tag </span>
-            <span className="truncate">{tripTag}</span>
-          </p>
-          <p className="mt-0.5 text-[13px] text-ink-2">
-            {dayRangeLabel(trip.from, trip.to)} ({trip.days} {trip.days === 1 ? "day" : "days"})
-          </p>
-          {trip.top.length ? (
-            <ul className="mt-2 space-y-1.5" aria-label="Top categories">
-              {trip.top.map((c) => (
-                <li key={c.name} className="flex min-w-0 items-center gap-2 text-[13px]">
-                  <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(c.name).color }} />
-                  <span className="min-w-0 flex-1 truncate text-ink">{c.name}</span>
-                  <span className="shrink-0 font-semibold text-ink tabular-nums">{formatMoney(c.minor, currency)}</span>
-                </li>
-              ))}
-            </ul>
+      {view === "calendar" ? (
+        calMonth ? (
+          <CalendarGrid
+            month={calMonth}
+            days={calDays}
+            today={today}
+            currency={currency}
+            selectedDay={period === ON_DAY ? day || null : null}
+            canPrev={canPrev}
+            canNext={canNext}
+            onPickDay={pickDay}
+            onMonth={moveMonth}
+          />
+        ) : null
+      ) : (
+        <>
+          {filtered.length > 0 ? (
+            <div className="mt-5 grid grid-cols-2 gap-3">
+              <Card className="px-4 py-3">
+                <p className="text-xs text-ink-2">Spent</p>
+                <p className="mt-0.5 truncate text-lg font-semibold text-ink tabular-nums">{formatMoney(summary.spent, currency)}</p>
+              </Card>
+              <Card className="px-4 py-3">
+                <p className="text-xs text-ink-2">Received</p>
+                <p className="mt-0.5 truncate text-lg font-semibold text-income tabular-nums">{formatMoney(summary.received, currency)}</p>
+              </Card>
+            </div>
           ) : null}
-        </Card>
-      ) : null}
 
-      <div className="mt-6">
-        {filtered.length === 0 ? (
-          <Card className="flex flex-col items-center p-8 text-center">
-            <SearchX size={28} className="text-ink-3" aria-hidden />
-            <p className="mt-3 font-medium text-ink">
-              {txns.length === 0 ? "No transactions yet" : kind === "REVIEW" ? "Nothing needs review" : "No matching transactions"}
-            </p>
-            <p className="mt-1 text-sm text-ink-2">
-              {txns.length === 0
-                ? "Bank SMS forwarded by your iPhone Shortcut will show up here. Paid in cash? Tap Add."
-                : kind === "REVIEW"
-                  ? "No unreadable SMS or possible duplicates."
-                  : "Try a different search or filter."}
-            </p>
-            {filtersActive && txns.length > 0 ? (
-              <button type="button" onClick={resetFilters} className="mt-4 h-10 rounded-full bg-ink px-5 text-sm font-semibold text-canvas">
-                Clear filters
-              </button>
-            ) : null}
-          </Card>
-        ) : (
-          <>
-            <TransactionGroups items={filtered.slice(0, visible)} />
-            {visible < filtered.length ? <div ref={sentinelRef} className="h-10" aria-hidden /> : null}
-          </>
-        )}
-      </div>
+          {filtered.length > 0 && trip && tripTag ? (
+            <Card className="mt-3 px-4 py-3">
+              <p className="flex min-w-0 items-center gap-1.5 text-sm font-semibold text-ink">
+                <Hash size={14} className="shrink-0 text-violet-strong" aria-hidden />
+                <span className="sr-only">Tag </span>
+                <span className="truncate">{tripTag}</span>
+              </p>
+              <p className="mt-0.5 text-[13px] text-ink-2">
+                {dayRangeLabel(trip.from, trip.to)} ({trip.days} {trip.days === 1 ? "day" : "days"})
+              </p>
+              {trip.top.length ? (
+                <ul className="mt-2 space-y-1.5" aria-label="Top categories">
+                  {trip.top.map((c) => (
+                    <li key={c.name} className="flex min-w-0 items-center gap-2 text-[13px]">
+                      <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(c.name).color }} />
+                      <span className="min-w-0 flex-1 truncate text-ink">{c.name}</span>
+                      <span className="shrink-0 font-semibold text-ink tabular-nums">{formatMoney(c.minor, currency)}</span>
+                    </li>
+                  ))}
+                </ul>
+              ) : null}
+            </Card>
+          ) : null}
+
+          <div className="mt-6">
+            {filtered.length === 0 ? (
+              <Card className="flex flex-col items-center p-8 text-center">
+                <SearchX size={28} className="text-ink-3" aria-hidden />
+                <p className="mt-3 font-medium text-ink">
+                  {txns.length === 0 ? "No transactions yet" : kind === "REVIEW" ? "Nothing needs review" : "No matching transactions"}
+                </p>
+                <p className="mt-1 text-sm text-ink-2">
+                  {txns.length === 0
+                    ? "Bank SMS forwarded by your iPhone Shortcut will show up here. Paid in cash? Tap Add."
+                    : kind === "REVIEW"
+                      ? "No unreadable SMS or possible duplicates."
+                      : "Try a different search or filter."}
+                </p>
+                {filtersActive && txns.length > 0 ? (
+                  <button type="button" onClick={resetFilters} className="mt-4 h-10 rounded-full bg-ink px-5 text-sm font-semibold text-canvas">
+                    Clear filters
+                  </button>
+                ) : null}
+              </Card>
+            ) : (
+              <>
+                <TransactionGroups items={filtered.slice(0, visible)} />
+                {visible < filtered.length ? <div ref={sentinelRef} className="h-10" aria-hidden /> : null}
+              </>
+            )}
+          </div>
+        </>
+      )}
 
       {adding ? <AddTransactionSheet onClose={closeAdd} onAdded={onAdded} /> : null}
       {moreOpen ? (

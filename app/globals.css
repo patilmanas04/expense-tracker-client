@@ -24,6 +24,8 @@
   --color-violet: #8458f5;
   --color-violet-strong: #7243ec;
   --color-violet-soft: #f2edff;
+  /* Text on Activity's heaviest calendar shade (violet 85% over surface): 5.4:1 light, 4.85:1 dark */
+  --color-on-shade: #111113;
   --color-blue: #38b6ff;
   --color-blue-soft: #e8f6ff;
   --color-green: #22b566;
@@ -67,6 +69,7 @@
   --color-violet: #9b7bff;
   --color-violet-strong: #a78bff;
   --color-violet-soft: #2a2342;
+  --color-on-shade: #0c0c0f;
   --color-blue-soft: #15283a;
   --color-coral-soft: #3a2320;
   --color-coral-ink: #ff9a85;

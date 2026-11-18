@@ -88,7 +88,19 @@ export function DailyBars({
 export const INCOME_COLOR = "#38B6FF";
 export const EXPENSE_COLOR = "#8458F5";
 
-export function TrendBars({ data, currency }: { data: MonthPoint[]; currency: string }) {
+export function TrendBars({
+  data,
+  currency,
+  expenseOnly = false,
+  inProgress = null,
+}: {
+  data: MonthPoint[];
+  currency: string;
+  /** Spending only (the trend card): no income bar; `inProgress` is drawn faded as "so far". */
+  expenseOnly?: boolean;
+  inProgress?: string | null;
+}) {
+  if (expenseOnly) return <SpendingBars data={data} currency={currency} inProgress={inProgress} />;
   return (
     <figure aria-label="Income and expenses by month">
       <div className="mb-3 flex items-center gap-4 text-[13px] text-ink-2">
@@ -138,6 +150,70 @@ export function TrendBars({ data, currency }: { data: MonthPoint[]; currency: st
         caption="Income and expenses by month"
         headers={["Month", "Income", "Expenses"]}
         rows={data.map((d) => [monthLabel(d.month), formatMoney(d.income, currency), formatMoney(d.expense, currency)])}
+      />
+    </figure>
+  );
+}
+
+/** One bar per month; the month in progress is a faded "so far" bar on the same slot. */
+function SpendingBars({ data, currency, inProgress }: { data: MonthPoint[]; currency: string; inProgress: string | null }) {
+  const hasProgress = inProgress !== null && data.some((p) => p.month === inProgress);
+  const chartData = data.map((p) => ({
+    ...p,
+    done: p.month === inProgress ? 0 : p.expense,
+    soFar: p.month === inProgress ? p.expense : 0,
+  }));
+  return (
+    <figure aria-label="Spending by month">
+      <div className="mb-3 flex items-center gap-4 text-[13px] text-ink-2">
+        <span className="flex items-center gap-1.5">
+          <span aria-hidden className="size-2.5 rounded-[3px]" style={{ backgroundColor: EXPENSE_COLOR }} /> Spent
+        </span>
+        {hasProgress ? (
+          <span className="flex items-center gap-1.5">
+            <span aria-hidden className="size-2.5 rounded-[3px]" style={{ backgroundColor: EXPENSE_COLOR, opacity: 0.45 }} /> So far
+          </span>
+        ) : null}
+      </div>
+      <div className="h-56 w-full">
+        <ResponsiveContainer width="100%" height="100%">
+          <BarChart data={chartData} margin={{ top: 8, right: 4, bottom: 0, left: 0 }} barGap={2} barCategoryGap="28%">
+            <CartesianGrid vertical={false} stroke={GRID} />
+            <XAxis dataKey="label" tickLine={false} axisLine={{ stroke: GRID }} tick={AXIS_TICK} />
+            <YAxis
+              tickLine={false}
+              axisLine={false}
+              tick={AXIS_TICK}
+              width={48}
+              allowDecimals={false}
+              tickFormatter={(v: number) => compactMoney(v, currency)}
+            />
+            <Tooltip
+              cursor={{ fill: "rgb(132 88 245 / 0.07)", radius: 8 }}
+              content={({ active, payload }: ChartTooltipProps) => {
+                const point = payload?.[0]?.payload as MonthPoint | undefined;
+                if (!active || !point) return null;
+                return (
+                  <TooltipCard
+                    title={monthLabel(point.month) + (point.month === inProgress ? " · so far" : "")}
+                    currency={currency}
+                    rows={[{ name: "spent", color: EXPENSE_COLOR, value: point.expense }]}
+                  />
+                );
+              }}
+            />
+            <Bar dataKey="done" stackId="spent" fill={EXPENSE_COLOR} radius={[4, 4, 0, 0]} maxBarSize={28} />
+            <Bar dataKey="soFar" stackId="spent" fill={EXPENSE_COLOR} fillOpacity={0.45} radius={[4, 4, 0, 0]} maxBarSize={28} />
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+      <DataTable
+        caption="Spending by month"
+        headers={["Month", "Spent"]}
+        rows={data.map((d) => [
+          monthLabel(d.month) + (d.month === inProgress ? " (so far)" : ""),
+          formatMoney(d.expense, currency),
+        ])}
       />
     </figure>
   );

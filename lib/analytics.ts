@@ -12,7 +12,10 @@ import {
   toMinor,
 } from "./format";
 import { tagsOf } from "./tags";
+import { summarizeTrend, type TrendSummary } from "./trend";
 import type { Transaction, TxType } from "./types";
+
+export type { TrendSummary } from "./trend";
 
 /** A transaction with precomputed IST day/month and an integer amount in paise. */
 export interface Txn extends Transaction {
@@ -317,6 +320,61 @@ export function monthlyTrend(txns: Txn[], endMonth: string, currency: string, mo
     else point.expense += t.minor;
   }
   return points;
+}
+
+/**
+ * Trend stats for one category's or merchant's rows: `points` from monthlyTrend(rows, endMonth, currency, n).
+ * Sums counted DEBITs by countsIn with countsDay <= today's day (doc 15 switches the sums to t.counted;
+ * doc 14 changes countsIn/countsDay to pay periods).
+ */
+export function trendStats(points: MonthPoint[], rows: Txn[], currency: string, today: string): TrendSummary<MonthPoint> {
+  const day = dayOfMonth(today);
+  const months = new Set(points.map((p) => p.month));
+  const upToDay: Record<string, number> = {};
+  for (const t of rows) {
+    if (t.type !== "DEBIT" || !months.has(t.countsIn) || t.countsDay > day || !counts(t, currency)) continue;
+    upToDay[t.countsIn] = (upToDay[t.countsIn] ?? 0) + t.minor;
+  }
+  return summarizeTrend(points, monthOf(today), upToDay);
+}
+
+export interface TrendMerchant {
+  key: string;
+  name: string;
+  minor: number;
+}
+
+/** Top merchants by counted spending (DEBIT, countsIn in from..to inclusive), keyed like topMerchants; newest name. */
+export function trendMerchants(rows: Txn[], from: string, to: string, currency: string, limit = 20): TrendMerchant[] {
+  const byKey = new Map<string, TrendMerchant>();
+  for (const t of rows) {
+    if (t.type !== "DEBIT" || t.countsIn < from || t.countsIn > to || !counts(t, currency)) continue;
+    const name = t.merchant?.trim();
+    if (!name) continue;
+    const key = name.toLowerCase();
+    const entry = byKey.get(key) ?? { key, name, minor: 0 }; // rows are newest first: the newest name labels it
+    entry.minor += t.minor;
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()].sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name)).slice(0, limit);
+}
+
+export interface TrendCategory {
+  name: string;
+  minor: number;
+}
+
+/** Categories with counted spending (DEBIT, countsIn in from..to inclusive), most spending first, then by name. */
+export function trendCategories(txns: Txn[], from: string, to: string, currency: string): TrendCategory[] {
+  const byName = new Map<string, number>();
+  for (const t of txns) {
+    if (t.type !== "DEBIT" || t.countsIn < from || t.countsIn > to || !counts(t, currency)) continue;
+    const name = categoryName(t);
+    byName.set(name, (byName.get(name) ?? 0) + t.minor);
+  }
+  return [...byName]
+    .map(([name, minor]) => ({ name, minor }))
+    .sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name));
 }
 
 export interface MerchantStat {

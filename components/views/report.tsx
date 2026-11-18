@@ -22,6 +22,7 @@ import { DailyBars, EXPENSE_COLOR, INCOME_COLOR, TrendBars } from "../charts/bar
 import { Donut } from "../charts/donut";
 import { useData } from "../data-provider";
 import { CategoryCard, HabitsCard, MerchantList, PaceCard, toSegments } from "../insight-cards";
+import { TrendCard } from "../trend-card";
 import { Card, Segmented, SelectPill, cx } from "../ui";
 
 const CATEGORY_PREVIEW = 6;
@@ -191,6 +192,10 @@ export function ReportView() {
           <p className="mt-0.5 mb-4 text-sm text-ink-2">Income and expenses, last 6 months</p>
           <TrendBars data={trend} currency={currency} />
         </Card>
+
+        <div className="order-7 lg:order-none lg:col-span-2">
+          <TrendCard txns={txns} month={month} currency={currency} today={today} />
+        </div>
       </div>
     </div>
   );
