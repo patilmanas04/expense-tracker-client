@@ -1,10 +1,10 @@
 "use client";
 
-import { Gauge, Info, Store } from "lucide-react";
+import { Gauge, Info, Repeat, Store } from "lucide-react";
 
-import type { CategoryStat, MerchantStat, Pace } from "@/lib/analytics";
-import { OTHER, PALETTE, categoryMeta } from "@/lib/categories";
-import { formatMoney, formatPercent, monthName } from "@/lib/format";
+import type { CategoryStat, FrequentSpend, MerchantStat, Pace, Txn } from "@/lib/analytics";
+import { OTHER, PALETTE, categoryMeta, categoryName } from "@/lib/categories";
+import { formatMoney, formatPercent, monthName, shortDayLabel } from "@/lib/format";
 import type { TxType } from "@/lib/types";
 
 import type { DonutSegment } from "./charts/donut";
@@ -160,6 +160,64 @@ export function MerchantList({ merchants, type, currency }: { merchants: Merchan
           ))}
         </ol>
       )}
+    </Card>
+  );
+}
+
+/** Report → Habits (INR expenses only): frequent small spends and the month's biggest payments. */
+export function HabitsCard({ frequent, biggest, onOpen }: { frequent: FrequentSpend[]; biggest: Txn[]; onOpen: (id: string) => void }) {
+  if (!frequent.length && !biggest.length) return null;
+  return (
+    <Card className="p-5">
+      <div className="flex items-center gap-3">
+        <IconTile icon={Repeat} color={PALETTE.teal} size="sm" />
+        <h3 className="text-[17px] font-semibold text-ink">Habits</h3>
+      </div>
+      {frequent.length ? (
+        <>
+          <p className="mt-4 text-[13px] text-ink-2">Frequent small spends</p>
+          <ol className="mt-3 space-y-3.5">
+            {frequent.map((f) => (
+              <li key={f.name} className="flex items-center gap-3">
+                <CategoryTile name={f.category} size="sm" />
+                <span className="min-w-0 flex-1 truncate text-[15px] font-medium text-ink">{f.name}</span>
+                <span className="shrink-0 text-[14px] tabular-nums text-ink-2">
+                  {f.count} times · {formatMoney(f.minor, "INR", { decimals: false })}
+                </span>
+              </li>
+            ))}
+          </ol>
+        </>
+      ) : null}
+      {biggest.length ? (
+        <>
+          <p className="mt-4 text-[13px] text-ink-2">Biggest payments</p>
+          <ol className="mt-1.5">
+            {biggest.map((t) => {
+              const name = t.merchant?.trim() || categoryName(t);
+              const amount = formatMoney(t.minor, "INR");
+              const day = shortDayLabel(t.day);
+              return (
+                <li key={t.id}>
+                  <button
+                    type="button"
+                    onClick={() => onOpen(t.id)}
+                    aria-label={`${name}, ${amount}, ${day}. Open payment`}
+                    className="-mx-2 flex w-[calc(100%+1rem)] items-center gap-3 rounded-2xl px-2 py-2 text-left transition hover:bg-canvas/60 focus-visible:outline-2 focus-visible:outline-violet"
+                  >
+                    <CategoryTile name={categoryName(t)} size="sm" />
+                    <span className="min-w-0 flex-1">
+                      <span className="block truncate text-[15px] font-medium text-ink">{name}</span>
+                      <span className="block text-[13px] text-ink-2">{day}</span>
+                    </span>
+                    <span className="shrink-0 text-[15px] font-semibold tabular-nums text-ink">{amount}</span>
+                  </button>
+                </li>
+              );
+            })}
+          </ol>
+        </>
+      ) : null}
     </Card>
   );
 }

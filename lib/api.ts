@@ -13,6 +13,7 @@ import type {
   NewTransaction,
   RulePreview,
   RuleSaved,
+  Settings,
   Transaction,
   TransactionPatch,
   User,
@@ -162,6 +163,13 @@ export const markNotDuplicate = (id: string) =>
   request<Transaction>(`/api/v1/transactions/${id}/not-duplicate`, { method: "POST" });
 
 const JSON_HEADERS = { Accept: "application/json", "Content-Type": "application/json" };
+
+/** Every setting, defaults filled in. */
+export const getSettings = () => request<Settings>("/api/v1/settings");
+
+/** Changes only the keys given; returns every setting. 422 names the bad key: "<key>: <message>". */
+export const saveSettings = (changes: Partial<Settings>) =>
+  request<Settings>("/api/v1/settings", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(changes) });
 
 /** Merged names, newest first. */
 export const getMerchantNames = () => request<MerchantName[]>("/api/v1/merchant-names");

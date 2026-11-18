@@ -341,3 +341,43 @@ export function CheckRow({
     </label>
   );
 }
+
+/**
+ * On/off switch (role="switch"). `label` is what screen readers hear; show visible text beside it.
+ * Reusable by later settings (docs 13, 14).
+ */
+export function Switch({
+  checked,
+  onChange,
+  label,
+  disabled = false,
+}: {
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+  label: string;
+  disabled?: boolean;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={checked}
+      aria-label={label}
+      disabled={disabled}
+      onClick={() => onChange(!checked)}
+      className={cx(
+        "flex h-[31px] w-[51px] shrink-0 items-center rounded-full p-[2px] transition-colors focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-violet disabled:opacity-60",
+        // Off: a mid-grey track with an edge at >= 3:1 against the card in both themes (WCAG 1.4.11)
+        checked ? "bg-violet" : "bg-ink-3/60 ring-1 ring-inset ring-ink-2/70",
+      )}
+    >
+      <span
+        aria-hidden
+        className={cx(
+          "size-[27px] rounded-full bg-white shadow-[0_2px_4px_rgb(0_0_0/0.2),0_0_0_0.5px_rgb(0_0_0/0.06)] transition-transform duration-200",
+          checked ? "translate-x-5" : "translate-x-0",
+        )}
+      />
+    </button>
+  );
+}

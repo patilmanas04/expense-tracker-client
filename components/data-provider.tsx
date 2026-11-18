@@ -21,6 +21,7 @@ import {
   getLimits,
   getMe,
   getNotifications,
+  getSettings,
   getTransactionsSince,
   clearNotifications as apiClearNotifications,
   dismissNotification as apiDismissNotification,
@@ -30,11 +31,22 @@ import {
   saveBalance as apiSaveBalance,
   saveLimits as apiSaveLimits,
   saveMerchantLimit as apiSaveMerchantLimit,
+  saveSettings as apiSaveSettings,
   signOut as apiSignOut,
   updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
 import { dayKey, monthOf } from "@/lib/format";
-import type { Balance, Inbox, LimitsInput, LimitsSummary, MerchantLimitInput, NewTransaction, TransactionPatch, User } from "@/lib/types";
+import type {
+  Balance,
+  Inbox,
+  LimitsInput,
+  LimitsSummary,
+  MerchantLimitInput,
+  NewTransaction,
+  Settings,
+  TransactionPatch,
+  User,
+} from "@/lib/types";
 
 /** "expired": the backend rejected the session cookie; "signed-out": you signed out. */
 export type Status = "loading" | "signed-out" | "expired" | "ready" | "error";
@@ -82,6 +94,10 @@ interface DataContextValue {
   saveLimits: (limits: LimitsInput) => Promise<LimitsSummary>;
   /** Adds, changes or removes one merchant's limit. */
   saveMerchantLimit: (body: MerchantLimitInput) => Promise<LimitsSummary>;
+  /** Alert settings and the like; null until loaded, or when the server didn't answer. */
+  settings: Settings | null;
+  /** Changes only the keys given. Throws ApiError; a 422 message names the key ("<key>: <message>"). */
+  saveSettings: (changes: Partial<Settings>) => Promise<Settings>;
   /** In-app notifications (bell on Home). */
   inbox: Inbox;
   notificationsOpen: boolean;
@@ -153,20 +169,21 @@ function withoutHidden(inbox: Inbox, hidden: Set<string>): Inbox {
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 
 type LoadResult =
-  | { kind: "ok"; user: User; txns: Txn[]; balance: Balance | null; inbox: Inbox }
+  | { kind: "ok"; user: User; txns: Txn[]; balance: Balance | null; inbox: Inbox; settings: Settings | null }
   | { kind: "signed-out" }
   | { kind: "error"; message: string };
 
 async function fetchEverything(): Promise<LoadResult> {
   try {
     const user = await getMe();
-    const [list, balance, inbox] = await Promise.all([
+    const [list, balance, inbox, settings] = await Promise.all([
       getAllTransactions(),
-      // The balance and notifications are optional; never let them block the dashboard.
+      // The balance, notifications and settings are optional; never let them block the dashboard.
       getBalance().catch(() => null),
       getNotifications().catch(() => EMPTY_INBOX),
+      getSettings().catch(() => null),
     ]);
-    return { kind: "ok", user, txns: prepare(list), balance, inbox };
+    return { kind: "ok", user, txns: prepare(list), balance, inbox, settings };
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return { kind: "signed-out" };
     return { kind: "error", message: e instanceof Error ? e.message : "Something went wrong." };
@@ -188,6 +205,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [inbox, setInbox] = useState<Inbox>(EMPTY_INBOX);
   const hiddenNotes = useRef(new Set<string>()); // swiped away or cleared; a poll in flight can't bring them back
   const [limits, setLimits] = useState<LimitsSummary | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null); // not polled; reloads with Sync
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
   const lastSyncedRef = useRef(0);
@@ -205,6 +223,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setTxns(result.txns);
       setBalance(result.balance);
       setInbox(withoutHidden(result.inbox, hiddenNotes.current));
+      // A failed settings load keeps the last value.
+      setSettings((current) => (!result.settings || same(current, result.settings) ? current : result.settings));
       setToday(now);
       setMonth((m) => m || monthOf(now));
       setCurrency((c) => c || preferredCurrency(result.txns));
@@ -368,6 +388,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setBalance(null);
       setInbox(EMPTY_INBOX);
       setLimits(null);
+      setSettings(null);
       setSelectedId(null);
       setStatus("signed-out");
     }
@@ -391,6 +412,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const saveMerchantLimit = useCallback(async (body: MerchantLimitInput) => {
     const next = await apiSaveMerchantLimit(body);
     setLimits(next);
+    return next;
+  }, []);
+
+  const saveSettings = useCallback(async (changes: Partial<Settings>) => {
+    const next = await apiSaveSettings(changes);
+    setSettings(next);
     return next;
   }, []);
 
@@ -591,6 +618,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       limits,
       saveLimits,
       saveMerchantLimit,
+      settings,
+      saveSettings,
       inbox,
       notificationsOpen: notificationsOpenedAt > 0,
       notificationsOpenedAt,
@@ -635,6 +664,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       limits,
       saveLimits,
       saveMerchantLimit,
+      settings,
+      saveSettings,
       inbox,
       notificationsOpenedAt,
       openNotifications,

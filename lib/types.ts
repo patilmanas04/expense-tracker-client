@@ -233,3 +233,10 @@ export interface RuleSaved {
   /** Past payments changed (0 unless applied to past payments). */
   changed: number;
 }
+
+/** Every setting (server: settings_store.KEYS). Later designs add their keys here. */
+export interface Settings {
+  /** Whole rupees; null = Off. */
+  "alerts.large_amount": number | null;
+  "alerts.unusual": boolean;
+}

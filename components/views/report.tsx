@@ -5,20 +5,29 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { categoryBreakdown, dailySeries, monthTotals, monthlyTrend, spendingPace, topMerchants } from "@/lib/analytics";
+import {
+  biggestPayments,
+  categoryBreakdown,
+  dailySeries,
+  frequentSmallSpends,
+  monthTotals,
+  monthlyTrend,
+  spendingPace,
+  topMerchants,
+} from "@/lib/analytics";
 import { formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
 import type { TxType } from "@/lib/types";
 
 import { DailyBars, EXPENSE_COLOR, INCOME_COLOR, TrendBars } from "../charts/bars";
 import { Donut } from "../charts/donut";
 import { useData } from "../data-provider";
-import { CategoryCard, MerchantList, PaceCard, toSegments } from "../insight-cards";
+import { CategoryCard, HabitsCard, MerchantList, PaceCard, toSegments } from "../insight-cards";
 import { Card, Segmented, SelectPill, cx } from "../ui";
 
 const CATEGORY_PREVIEW = 6;
 
 export function ReportView() {
-  const { txns, month, setMonth, months, currency, today, requestActivity } = useData();
+  const { txns, month, setMonth, months, currency, today, requestActivity, openTransaction } = useData();
   const router = useRouter();
   const [type, setType] = useState<TxType>("DEBIT");
   const [chart, setChart] = useState<"donut" | "bars">("donut");
@@ -30,6 +39,10 @@ export function ReportView() {
   const merchants = useMemo(() => topMerchants(txns, month, currency, type), [txns, month, currency, type]);
   const invested = useMemo(() => monthTotals(txns, month, currency).invested, [txns, month, currency]);
   const pace = useMemo(() => (type === "DEBIT" ? spendingPace(txns, month, currency, today) : null), [txns, month, currency, today, type]);
+  // Habits are in rupees and about spending only.
+  const habitsOn = currency === "INR" && type === "DEBIT";
+  const frequent = useMemo(() => (habitsOn ? frequentSmallSpends(txns, month) : []), [txns, month, habitsOn]);
+  const biggest = useMemo(() => (habitsOn ? biggestPayments(txns, month) : []), [txns, month, habitsOn]);
 
   const series = type === "DEBIT" ? "expense" : "income";
   const total = categories.reduce((s, c) => s + c.minor, 0);
@@ -70,8 +83,8 @@ export function ReportView() {
         ]}
       />
 
-      {/* Phones: report, categories, pace, merchants (reference order).
-          Desktop: report/pace/merchants stacked left, categories right.
+      {/* Phones: report, categories, pace, merchants, habits, cash flow (reference order).
+          Desktop: report/pace/merchants/habits stacked left, categories right, cash flow below both.
           grid-cols-1 (minmax(0, 1fr)) keeps the phone column at the screen's width: an implicit
           `auto` column would grow to fit a long merchant name and push the page sideways. */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
@@ -134,6 +147,12 @@ export function ReportView() {
         <div className="order-4">
           <MerchantList merchants={merchants} type={type} currency={currency} />
         </div>
+
+        {frequent.length || biggest.length ? (
+          <div className="order-5">
+            <HabitsCard frequent={frequent} biggest={biggest} onOpen={openTransaction} />
+          </div>
+        ) : null}
         </div>
 
         <section aria-labelledby="all-categories" className="order-2 lg:order-none">
@@ -167,7 +186,7 @@ export function ReportView() {
           ) : null}
         </section>
 
-        <Card className="order-5 p-5 sm:p-6 lg:order-none lg:col-span-2">
+        <Card className="order-6 p-5 sm:p-6 lg:order-none lg:col-span-2">
           <h2 className="text-lg font-semibold tracking-tight text-ink">Cash flow</h2>
           <p className="mt-0.5 mb-4 text-sm text-ink-2">Income and expenses, last 6 months</p>
           <TrendBars data={trend} currency={currency} />

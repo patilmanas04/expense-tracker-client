@@ -327,6 +327,48 @@ export function topMerchants(txns: Txn[], month: string, currency: string, type:
   return [...byKey.values()].sort((a, b) => b.minor - a.minor).slice(0, limit);
 }
 
+/** Habits: a payment under this counts as a small spend (under ₹500). */
+export const SMALL_SPEND_MINOR = 50000; // under ₹500
+/** Habits: small spends at one merchant in the month before it's listed as frequent. */
+export const FREQUENT_MIN_COUNT = 8;
+
+export interface FrequentSpend {
+  name: string;
+  category: string;
+  count: number;
+  minor: number;
+}
+
+/**
+ * Merchants paid at least FREQUENT_MIN_COUNT times this month in counted INR debits under
+ * SMALL_SPEND_MINOR each, grouped by Top merchants' key; most payments first. Totals sum `t.minor`
+ * (switch to `t.counted` once doc 15 ships). `txns` are newest first, so the newest name labels a group.
+ */
+export function frequentSmallSpends(txns: Txn[], month: string, limit = 5): FrequentSpend[] {
+  const byKey = new Map<string, FrequentSpend>();
+  for (const t of txns) {
+    if (t.countsIn !== month || t.type !== "DEBIT" || !counts(t, "INR") || t.minor >= SMALL_SPEND_MINOR) continue;
+    if (merchantKey(t.merchant) === null) continue;
+    const key = t.merchant!.trim().toLowerCase();
+    const entry = byKey.get(key) ?? { name: t.merchant!.trim(), category: categoryName(t), count: 0, minor: 0 };
+    entry.count += 1;
+    entry.minor += t.minor;
+    byKey.set(key, entry);
+  }
+  return [...byKey.values()]
+    .filter((f) => f.count >= FREQUENT_MIN_COUNT)
+    .sort((a, b) => b.count - a.count || b.minor - a.minor || a.name.localeCompare(b.name))
+    .slice(0, limit);
+}
+
+/** This month's largest counted INR debits, by full amount; newest first on a tie. */
+export function biggestPayments(txns: Txn[], month: string, limit = 3): Txn[] {
+  return txns
+    .filter((t) => t.countsIn === month && t.type === "DEBIT" && counts(t, "INR"))
+    .sort((a, b) => b.minor - a.minor || b.time - a.time)
+    .slice(0, limit);
+}
+
 export interface Pace {
   spent: number;
   lastMonthTotal: number;

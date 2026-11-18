@@ -2,7 +2,7 @@
 
 import { ChevronRight, Gauge, Landmark, ListChecks, LogOut, Mail, RefreshCw, Share, SquarePlus } from "lucide-react";
 import Link from "next/link";
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useId, useState, type FormEvent, type ReactNode } from "react";
 
 import { needsReview } from "@/lib/analytics";
 import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, toMinor } from "@/lib/format";
@@ -10,7 +10,7 @@ import { dateTimeLabel, formatMoney, longDayLabel, parseAmountInput, toMinor } f
 import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
 import { useTheme, type Theme } from "../theme";
-import { Amount, Avatar, Card, IconTile, Segmented, SelectPill } from "../ui";
+import { Amount, Avatar, Card, IconTile, Segmented, SelectPill, Switch } from "../ui";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
 import { RULES_PAGE } from "./rules";
 
@@ -41,6 +41,8 @@ export function SettingsView() {
       ) : null}
 
       <BalanceSection />
+
+      <AlertsSection />
 
       <LimitsSection />
 
@@ -266,6 +268,208 @@ function BalanceSection() {
         ) : null}
       </Card>
     </section>
+  );
+}
+
+/** The server's message without its "<key>: " prefix (a 422 names the setting it's about). */
+const settingError = (err: unknown, fallback: string) =>
+  err instanceof Error ? err.message.replace(/^[a-z0-9_.]+: /, "") : fallback;
+
+const LARGE_AMOUNT_MAX = 10_000_000;
+const LARGE_AMOUNT_HELP = "Enter a whole number of rupees from 1 to 1,00,00,000.";
+
+/** "5,000", "₹ 5000" → 5000; null unless a whole number of rupees from 1 to 1,00,00,000. */
+function parseRupees(text: string): number | null {
+  const cleaned = text.replace(/[₹,\s]/g, "");
+  if (!/^\d{1,8}$/.test(cleaned)) return null;
+  const rupees = Number(cleaned);
+  return rupees >= 1 && rupees <= LARGE_AMOUNT_MAX ? rupees : null;
+}
+
+/** Payment alerts (notifications in the bell): large payments and payments unusual for the merchant. */
+function AlertsSection() {
+  const { settings, saveSettings } = useData();
+  return (
+    <section id="alerts" className="mt-6 scroll-mt-6">
+      <h2 className="mb-2 px-1 text-[15px] text-ink-2">Alerts</h2>
+      <Card className="divide-y divide-line overflow-hidden">
+        {settings ? (
+          <>
+            <LargeAmountRow saved={settings["alerts.large_amount"]} save={saveSettings} />
+            <UnusualRow saved={settings["alerts.unusual"]} save={saveSettings} />
+          </>
+        ) : (
+          <p className="p-4 text-[13px] text-ink-2">Alert settings aren&apos;t available right now. Tap Sync below to try again.</p>
+        )}
+      </Card>
+    </section>
+  );
+}
+
+type SaveSettings = ReturnType<typeof useData>["saveSettings"];
+
+/** "Payments over ₹X": on asks for the amount first; off saves straight away. */
+function LargeAmountRow({ saved, save }: { saved: number | null; save: SaveSettings }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const inputId = useId();
+  const errorId = useId();
+
+  const startEditing = (value: string) => {
+    setDraft(value);
+    setError(null);
+    setEditing(true);
+  };
+
+  const toggle = async (on: boolean) => {
+    if (on) {
+      startEditing("");
+      return;
+    }
+    setError(null);
+    if (saved === null) {
+      setEditing(false); // nothing saved yet: just close the form
+      return;
+    }
+    setBusy(true);
+    try {
+      await save({ "alerts.large_amount": null });
+      setEditing(false);
+    } catch (err) {
+      setError(settingError(err, "Couldn't turn this off."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const submit = async (e: FormEvent) => {
+    e.preventDefault();
+    const rupees = parseRupees(draft);
+    if (rupees === null) {
+      setError(LARGE_AMOUNT_HELP);
+      return;
+    }
+    setBusy(true);
+    setError(null);
+    try {
+      await save({ "alerts.large_amount": rupees });
+      setEditing(false);
+    } catch (err) {
+      setError(settingError(err, "Couldn't save the amount."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const cancel = () => {
+    setError(null);
+    setEditing(false);
+  };
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] text-ink">Payments over</p>
+          {saved !== null && !editing ? (
+            <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-ink-2">
+              <span>Over {formatMoney(saved * 100, "INR", { decimals: false })}</span>
+              <button
+                type="button"
+                onClick={() => startEditing(String(saved))}
+                className="-my-1 rounded-full py-1 font-semibold text-violet-strong focus-visible:outline-2 focus-visible:outline-violet"
+              >
+                Change
+              </button>
+            </p>
+          ) : (
+            <p className="text-[13px] text-ink-2">Get a notification for any payment over this amount.</p>
+          )}
+        </div>
+        <Switch label="Payments over" checked={editing || saved !== null} onChange={(on) => void toggle(on)} disabled={busy} />
+      </div>
+      {editing ? (
+        <form onSubmit={submit} className="mt-3" noValidate>
+          <label htmlFor={inputId} className="sr-only">
+            Amount in rupees
+          </label>
+          <div className="relative">
+            <span className="pointer-events-none absolute top-1/2 left-4 -translate-y-1/2 text-lg font-semibold text-ink-2" aria-hidden>
+              ₹
+            </span>
+            <input
+              id={inputId}
+              type="text"
+              inputMode="numeric"
+              autoComplete="off"
+              enterKeyHint="done"
+              placeholder="5,000"
+              // Opened by the switch or "Change": the amount is what's wanted next.
+              autoFocus
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              aria-invalid={Boolean(error)}
+              aria-describedby={error ? errorId : undefined}
+              className="h-13 w-full min-w-0 rounded-2xl border border-line bg-canvas py-3 pr-4 pl-9 text-lg font-semibold text-ink tabular-nums outline-none placeholder:font-normal placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
+            />
+          </div>
+          {error ? (
+            <p id={errorId} role="alert" className="mt-2 text-[13px] font-medium text-expense">
+              {error}
+            </p>
+          ) : null}
+          <div className="mt-3 flex gap-2">
+            <button type="submit" disabled={busy} className="h-11 rounded-full bg-ink px-5 text-[15px] font-semibold text-canvas disabled:opacity-60">
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button type="button" onClick={cancel} className="h-11 rounded-full px-4 text-[15px] font-medium text-ink-2 hover:text-ink">
+              Cancel
+            </button>
+          </div>
+        </form>
+      ) : error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Unusual for the merchant": saves as soon as it's flipped. */
+function UnusualRow({ saved, save }: { saved: boolean; save: SaveSettings }) {
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const toggle = async (on: boolean) => {
+    setBusy(true);
+    setError(null);
+    try {
+      await save({ "alerts.unusual": on });
+    } catch (err) {
+      setError(settingError(err, "Couldn't save this setting."));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] text-ink">Unusual for the merchant</p>
+          <p className="text-[13px] text-ink-2">When a payment is at least 3× what you usually spend there, and ₹500 or more.</p>
+        </div>
+        <Switch label="Unusual for the merchant" checked={saved} onChange={(on) => void toggle(on)} disabled={busy} />
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </div>
   );
 }
 
