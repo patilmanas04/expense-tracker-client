@@ -44,11 +44,11 @@ export interface ExportFilters {
   period: { month: string } | { day: string } | { from?: string; to?: string } | null;
   category: string | null;
   tags: string[];
-  /** Activity's KindFilter: "ALL" | "DEBIT" | "CREDIT" | "REVIEW". */
+  /** Activity's KindFilter: "ALL" | "DEBIT" | "CREDIT" | "REVIEW" | "REFUND". */
   kind: string;
 }
 
-const KIND_PARTS: Record<string, string> = { REVIEW: "review", DEBIT: "debits", CREDIT: "credits" };
+const KIND_PARTS: Record<string, string> = { REVIEW: "review", REFUND: "refunds", DEBIT: "debits", CREDIT: "credits" };
 
 function periodPart(period: ExportFilters["period"]): string | null {
   if (!period) return null;

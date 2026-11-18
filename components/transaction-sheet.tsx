@@ -1,20 +1,30 @@
 "use client";
 
 import Link from "next/link";
-import { Check, ChevronRight, Copy, MessageSquareText, NotebookPen, Plus, Trash2, X } from "lucide-react";
+import { Check, ChevronRight, Copy, MessageSquareText, NotebookPen, Plus, Trash2, Undo2, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { carriedForward, isHeldOut, merchantKey, parsedByLabel, type Txn } from "@/lib/analytics";
-import { mergeMerchantName } from "@/lib/api";
+import { getRefund, mergeMerchantName } from "@/lib/api";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
-import { dateTimeLabel, formatMoney, monthLabel, shortDayLabel, timeLabel } from "@/lib/format";
+import {
+  dateTimeLabel,
+  decimalMoney,
+  formatMoney,
+  monthLabel,
+  parseAmountInput,
+  shiftDay,
+  shortDayLabel,
+  timeLabel,
+  toMinor,
+} from "@/lib/format";
 import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
-import type { TransactionPatch } from "@/lib/types";
+import type { RefundWatch, TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
 import { lockPageScroll, useSheetDrag } from "./sheet-drag";
-import { TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
+import { FIELD, Field, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 import { TagChips, transactionTitle } from "./transactions";
 import { Amount, CategoryTile, CheckRow, cx } from "./ui";
 import { RULES_PAGE } from "./views/rules";
@@ -340,6 +350,10 @@ function SheetBody({ t }: { t: Txn }) {
               ) : null}
             </div>
 
+            {/* A held-out duplicate is decided first; a watch already set still shows. */}
+            {t.is_parsed && debit && (t.refund || !isHeldOut(t)) ? <RefundCard t={t} /> : null}
+            {t.is_parsed && !debit && t.refund_for ? <RefundForLine t={t} /> : null}
+
             <dl className="divide-y divide-line rounded-card border border-line/70 bg-surface px-4 shadow-card">
               <Row label="Type">{debit ? "Money out" : "Money in"}</Row>
               <Row
@@ -460,6 +474,270 @@ function DuplicateCard({ t, onKept }: { t: Txn; onKept: () => void }) {
           {error}
         </p>
       ) : null}
+    </section>
+  );
+}
+
+/** Whole rupees without ".00": "2499", "2499.50". */
+const amountText = (amount: number) => amount.toFixed(2).replace(/\.00$/, "");
+/** Money as the server's error texts write it: "₹2,499", "₹2,499.50". */
+const moneyText = (t: Pick<Txn, "minor" | "currency">) => formatMoney(t.minor, t.currency, { decimals: t.minor % 100 !== 0 });
+
+const SECONDARY =
+  "h-9 rounded-full border border-line bg-surface px-4 text-sm font-medium text-ink transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50";
+const CHIP = "inline-flex shrink-0 items-center gap-1 rounded-full px-2.5 py-1 text-[12px] font-semibold";
+
+/**
+ * "Expect a refund" on a payment: a button, then an inline form (amount and a by-date), then the watch itself:
+ * expected (with "No refund expected") or refunded (opens the credit). The server asks about matching credits.
+ */
+function RefundCard({ t }: { t: Txn }) {
+  const { today, txns, markRefund, cancelRefund, openTransaction } = useData();
+  const amountRef = useRef<HTMLInputElement>(null);
+  const focusRef = useRef<HTMLButtonElement>(null); // "Expect a refund" or "No refund expected"
+  const refocus = useRef(false); // put focus back on `focusRef` once a save or cancel has rendered
+  const [form, setForm] = useState<{ amount: string; due: string } | null>(null); // set while writing
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  // The last watch fetched (or saved), kept on screen while the row's next change refetches it.
+  const [loaded, setLoaded] = useState<{ watch: RefundWatch | null; failed: boolean } | null>(null);
+  const writing = form !== null;
+  const minDue = today ? shiftDay(today, 1) : "";
+  const maxDue = today ? shiftDay(today, 60) : "";
+
+  useEffect(() => {
+    if (!t.refund) return;
+    let cancelled = false;
+    getRefund(t.id).then(
+      (watch) => {
+        if (!cancelled) setLoaded({ watch, failed: false });
+      },
+      () => {
+        if (!cancelled) setLoaded((current) => ({ watch: current?.watch ?? null, failed: true }));
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [t.id, t.refund, t.updated_at]);
+
+  // Writing focuses the amount; a save or cancel lands on the card's button.
+  useEffect(() => {
+    if (writing) {
+      amountRef.current?.focus({ preventScroll: true });
+      amountRef.current?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    } else if (refocus.current && focusRef.current) {
+      refocus.current = false;
+      focusRef.current.focus();
+    }
+  }, [writing, t.refund]);
+
+  const start = () => {
+    if (!today) return;
+    setForm({ amount: amountText(t.amount), due: shiftDay(today, 10) });
+    setError(null);
+  };
+  const stop = () => {
+    refocus.current = true;
+    setForm(null);
+    setError(null);
+  };
+  const change = (patch: Partial<{ amount: string; due: string }>) => {
+    setForm((current) => (current ? { ...current, ...patch } : current));
+    setError(null);
+  };
+
+  // Same checks and texts as the server.
+  const save = async () => {
+    if (!form) return;
+    const amount = parseAmountInput(form.amount);
+    if (amount === null || toMinor(Number(amount)) <= 0) return setError("Enter a refund amount more than zero.");
+    if (toMinor(Number(amount)) > t.minor) return setError(`The refund can't be more than the payment (${moneyText(t)}).`);
+    if (!form.due || form.due < minDue || form.due > maxDue) return setError("Pick a date 1 to 60 days from today.");
+    setSaving(true);
+    setError(null);
+    refocus.current = true;
+    try {
+      const watch = await markRefund({ transaction_id: t.id, amount, due_date: form.due });
+      setLoaded({ watch, failed: false }); // shown while the updated row refetches it: no "Loading…"
+      setForm(null);
+    } catch (err) {
+      refocus.current = false;
+      setError(err instanceof Error ? err.message : "Couldn't save that.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const cancel = async () => {
+    setSaving(true);
+    setError(null);
+    refocus.current = true;
+    try {
+      await cancelRefund(t.id);
+      setLoaded(null);
+    } catch (err) {
+      refocus.current = false;
+      setError(err instanceof Error ? err.message : "Couldn't remove that.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const errorLine = error ? (
+    <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+      {error}
+    </p>
+  ) : null;
+
+  if (!t.refund && !writing) {
+    return (
+      <button
+        ref={focusRef}
+        type="button"
+        onClick={start}
+        className="mb-4 flex w-full items-center gap-2 rounded-card border border-dashed border-line bg-surface/60 px-4 py-3.5 text-left text-sm font-medium text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet"
+      >
+        <Undo2 size={16} aria-hidden /> Expect a refund
+      </button>
+    );
+  }
+
+  if (!t.refund && form) {
+    return (
+      <form
+        aria-labelledby="refund-form-title"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void save();
+        }}
+        onKeyDown={(e) => {
+          if (e.key === "Escape" && !saving) {
+            e.preventDefault(); // keeps the sheet open
+            stop();
+          }
+        }}
+        className="mb-4 rounded-card border border-line/70 bg-surface p-4 shadow-card"
+      >
+        <p id="refund-form-title" className="flex items-center gap-2 text-sm font-medium text-ink-2">
+          <Undo2 size={16} aria-hidden /> Expect a refund
+        </p>
+        <Field id="refund-amount" label="Refund amount">
+          <input
+            ref={amountRef}
+            id="refund-amount"
+            inputMode="decimal"
+            autoComplete="off"
+            enterKeyHint="done"
+            value={form.amount}
+            disabled={saving}
+            onChange={(e) => change({ amount: e.target.value })}
+            className={FIELD}
+          />
+        </Field>
+        <Field id="refund-due" label="Expected by">
+          <input
+            id="refund-due"
+            type="date"
+            min={minDue}
+            max={maxDue}
+            value={form.due}
+            disabled={saving}
+            onChange={(e) => change({ due: e.target.value })}
+            className={`${FIELD} appearance-none [&::-webkit-date-and-time-value]:text-left min-w-0 w-full`}
+          />
+        </Field>
+        <p className="mt-2 text-[13px] text-ink-2">Folio will ask you when a matching credit arrives.</p>
+        {errorLine}
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button type="button" onClick={stop} disabled={saving} className={cx(CAPSULE, "glass relative text-ink")}>
+            Cancel
+          </button>
+          <button type="submit" disabled={saving} className={cx(CAPSULE, "glass-tint relative")}>
+            {saving ? "Saving…" : "Save"}
+          </button>
+        </div>
+      </form>
+    );
+  }
+
+  const details = loaded?.watch ?? null;
+
+  if (t.refund === "refunded") {
+    const credit = (details?.credit_id ? txns.find((o) => o.id === details.credit_id) : undefined) ?? txns.find((o) => o.refund_for === t.id);
+    return (
+      <section aria-label="Refund" className="mb-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
+        <span className={cx(CHIP, "bg-income-soft text-income")}>
+          <Undo2 size={13} aria-hidden /> Refunded
+        </span>
+        {credit ? (
+          <button
+            type="button"
+            onClick={() => openTransaction(credit.id)}
+            className="mt-0.5 -mb-1.5 flex min-h-9 w-full min-w-0 items-center gap-1.5 text-left text-[15px] font-semibold text-ink focus-visible:outline-2 focus-visible:outline-violet"
+          >
+            <span className="min-w-0 break-words">
+              Refunded by {moneyText(credit)} on {shortDayLabel(credit.day)}
+            </span>
+            <ChevronRight size={16} className="shrink-0 text-ink-3" aria-hidden />
+          </button>
+        ) : (
+          <p className="mt-2 text-[15px] font-semibold text-ink">Refunded</p>
+        )}
+      </section>
+    );
+  }
+
+  const overdue = details !== null && today > details.due_date;
+  return (
+    <section aria-label="Refund" className="mb-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
+      <span className={cx(CHIP, "bg-violet-soft text-violet-strong")}>
+        <Undo2 size={13} aria-hidden /> Refund expected
+      </span>
+      <p className="mt-2 min-w-0 text-[15px] font-semibold break-words text-ink">
+        {details ? (
+          <>
+            {decimalMoney(details.expected_amount, t.currency)} expected by {shortDayLabel(details.due_date)}
+            {overdue ? <span className="text-warn"> · overdue</span> : null}
+          </>
+        ) : (
+          <span className="font-normal text-ink-2">{loaded?.failed ? "Couldn't load the details." : "Loading…"}</span>
+        )}
+      </p>
+      <div className="mt-3 flex flex-wrap gap-2">
+        <button ref={focusRef} type="button" onClick={() => void cancel()} disabled={saving} className={SECONDARY}>
+          {saving ? "Removing…" : "No refund expected"}
+        </button>
+      </div>
+      {errorLine}
+    </section>
+  );
+}
+
+/** On a credit confirmed as a refund: the payment it refunded (opens it). */
+function RefundForLine({ t }: { t: Txn }) {
+  const { txns, openTransaction } = useData();
+  const payment = txns.find((o) => o.id === t.refund_for) ?? null;
+  return (
+    <section aria-label="Refund" className="mb-4 rounded-card border border-line/70 bg-surface p-4 shadow-card">
+      <span className={cx(CHIP, "bg-income-soft text-income")}>
+        <Undo2 size={13} aria-hidden /> Refunded
+      </span>
+      {payment ? (
+        <button
+          type="button"
+          onClick={() => openTransaction(payment.id)}
+          className="mt-0.5 -mb-1.5 flex min-h-9 w-full min-w-0 items-center gap-1.5 text-left text-[15px] font-semibold text-ink focus-visible:outline-2 focus-visible:outline-violet"
+        >
+          <span className="min-w-0 break-words">
+            Refund for {moneyText(payment)} to {transactionTitle(payment)} on {shortDayLabel(payment.day)}
+          </span>
+          <ChevronRight size={16} className="shrink-0 text-ink-3" aria-hidden />
+        </button>
+      ) : (
+        <p className="mt-2 text-[15px] font-semibold text-ink">Refund for an earlier payment</p>
+      )}
     </section>
   );
 }

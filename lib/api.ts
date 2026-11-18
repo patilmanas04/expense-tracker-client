@@ -16,6 +16,8 @@ import type {
   PayPeriods,
   RecurringDecision,
   RecurringSummary,
+  RefundWatch,
+  RefundWatchInput,
   RulePreview,
   RuleSaved,
   SafeToSpend,
@@ -179,6 +181,18 @@ export const markNotDuplicate = (id: string) =>
   request<Transaction>(`/api/v1/transactions/${id}/not-duplicate`, { method: "POST" });
 
 const JSON_HEADERS = { Accept: "application/json", "Content-Type": "application/json" };
+
+/** Marks a payment "Refund expected". 422 (amount/date), 409 when one is already expected. */
+export const markRefund = (input: RefundWatchInput) =>
+  request<RefundWatch>("/api/v1/refunds", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) });
+
+/** The refund expected on a payment; 404 when there is none. */
+export const getRefund = (transactionId: string) =>
+  request<RefundWatch>(`/api/v1/refunds/${encodeURIComponent(transactionId)}`);
+
+/** "No refund expected": removes the watch (a confirmed refund's credit stops showing it too). 404 when there is none. */
+export const cancelRefund = (transactionId: string) =>
+  request<void>(`/api/v1/refunds/${encodeURIComponent(transactionId)}`, { method: "DELETE" });
 
 /** Every setting, defaults filled in. */
 export const getSettings = () => request<Settings>("/api/v1/settings");

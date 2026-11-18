@@ -17,6 +17,7 @@ import {
 import {
   ApiError,
   addTransaction as apiAddTransaction,
+  cancelRefund as apiCancelRefund,
   clearBalance as apiClearBalance,
   clearRecurringDecision as apiClearRecurringDecision,
   deleteTransaction as apiDeleteTransaction,
@@ -34,6 +35,7 @@ import {
   clearNotifications as apiClearNotifications,
   dismissNotification as apiDismissNotification,
   markNotDuplicate as apiMarkNotDuplicate,
+  markRefund as apiMarkRefund,
   markNotificationsRead as apiMarkNotificationsRead,
   runNotificationAction as apiRunNotificationAction,
   saveBalance as apiSaveBalance,
@@ -56,6 +58,8 @@ import type {
   PayPeriods,
   RecurringDecision,
   RecurringSummary,
+  RefundWatch,
+  RefundWatchInput,
   Settings,
   TransactionPatch,
   UpcomingList,
@@ -64,7 +68,7 @@ import type {
 
 /** "expired": the backend rejected the session cookie; "signed-out": you signed out. */
 export type Status = "loading" | "signed-out" | "expired" | "ready" | "error";
-export type KindFilter = "ALL" | "DEBIT" | "CREDIT" | "REVIEW";
+export type KindFilter = "ALL" | "DEBIT" | "CREDIT" | "REVIEW" | "REFUND";
 
 /** A request from another screen to open Activity with a filter applied. */
 export interface ActivityRequest {
@@ -165,6 +169,16 @@ interface DataContextValue {
   updateTransaction: (id: string, patch: TransactionPatch) => Promise<Txn>;
   /** "Not a duplicate": the transaction counts again. Throws ApiError (e.g. 409 when already decided). */
   markNotDuplicate: (id: string) => Promise<Txn>;
+  /**
+   * "Expect a refund" on a payment. Throws ApiError (422 amount/date, 409 when one is already expected). The row
+   * shows it at once; the next poll brings the server's copy.
+   */
+  markRefund: (input: RefundWatchInput) => Promise<RefundWatch>;
+  /**
+   * "No refund expected": removes the watch, and the confirmed refund's link on its credit. Throws ApiError (404
+   * when there is none). The rows change at once; the next poll brings the server's copies.
+   */
+  cancelRefund: (id: string) => Promise<void>;
   /** Hides a transaction now and deletes it after `UNDO_MS`, unless undone. */
   deleteTransaction: (id: string) => void;
   /** Brings back the last deleted transaction while its undo window is open. */
@@ -642,6 +656,54 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [reloadBalance, poll],
   );
 
+  // Refund marks change rows on screen at once. The server bumps `updated_at` on each row it changed, so the
+  // next poll replaces these patched copies (mergeTransactions keeps a row only while `updated_at` is the same).
+  const patchRows = useCallback(
+    (patch: (t: Txn) => Partial<Pick<Txn, "refund" | "refund_for">> | null) =>
+      setTxns((current) => {
+        let changed = false;
+        const next = current.map((t) => {
+          const changes = patch(t);
+          if (!changes) return t;
+          changed = true;
+          return { ...t, ...changes };
+        });
+        return changed ? next : current;
+      }),
+    [],
+  );
+
+  const markRefund = useCallback(
+    async (input: RefundWatchInput) => {
+      let watch: RefundWatch;
+      try {
+        watch = await apiMarkRefund(input);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 409) void poll(); // marked elsewhere: show the server's state
+        throw e;
+      }
+      patchRows((t) => (t.id === input.transaction_id ? { refund: "expected" } : null));
+      void poll();
+      return watch;
+    },
+    [patchRows, poll],
+  );
+
+  const cancelRefund = useCallback(
+    async (id: string) => {
+      try {
+        await apiCancelRefund(id);
+      } catch (e) {
+        if (e instanceof ApiError && e.status === 404) void poll(); // removed elsewhere: show the server's state
+        throw e;
+      }
+      // The payment, and the credit confirmed as its refund (if any).
+      patchRows((t) => (t.id === id ? { refund: null } : t.refund_for === id ? { refund_for: null } : null));
+      void poll();
+    },
+    [patchRows, poll],
+  );
+
   // Deleting is instant on screen; the server hears about it after the undo window.
   const commitDelete = useCallback(
     (txn: Txn, keepalive = false) => {
@@ -829,6 +891,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addTransaction,
       updateTransaction,
       markNotDuplicate,
+      markRefund,
+      cancelRefund,
       deleteTransaction,
       undoDelete,
       deletion,
@@ -888,6 +952,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       addTransaction,
       updateTransaction,
       markNotDuplicate,
+      markRefund,
+      cancelRefund,
       deleteTransaction,
       undoDelete,
       deletion,

@@ -9,7 +9,7 @@ const BASE = "http://folio.invalid";
 const BASE_ORIGIN = new URL(BASE).origin;
 
 /**
- * Reads a notification link of the form /activity?kind=review, /activity?tag=goa or
+ * Reads a notification link of the form /activity?kind=review|refund, /activity?tag=goa or
  * /activity?txn=<id> into a request for Activity. null for any other path or origin, which
  * opens as an ordinary link. Unknown parameters are ignored; a bare /activity gives {}.
  */
@@ -22,8 +22,9 @@ export function activityRequestFromLink(link: string): ActivityLinkRequest | nul
   }
   if (url.origin !== BASE_ORIGIN || url.pathname.replace(/\/+$/, "") !== "/activity") return null;
   const request: ActivityLinkRequest = {};
-  // Doc 12 adds refund → "REFUND".
-  if (url.searchParams.get("kind")?.trim().toLowerCase() === "review") request.kind = "REVIEW";
+  const kind = url.searchParams.get("kind")?.trim().toLowerCase();
+  if (kind === "review") request.kind = "REVIEW";
+  else if (kind === "refund") request.kind = "REFUND";
   const tag = (url.searchParams.get("tag") ?? "").replace(/^#/, "").trim().normalize("NFC").toLowerCase();
   if (tag) request.tag = tag;
   const txn = (url.searchParams.get("txn") ?? "").trim();

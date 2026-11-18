@@ -177,10 +177,11 @@ function matches(t: Txn, f: ActiveFilters, haystack: string) {
   return inPeriod(t, f.period, f.day, f.range, f.today, f.yesterday) && matchesExceptPeriod(t, f, haystack);
 }
 
-/** Every filter but the period: the calendar picks its own month. Doc 12's refund kind lands here, so the calendar gets it too. */
+/** Every filter but the period: the calendar picks its own month. The kind ("Refund expected" too) is here, so the calendar gets it as well. */
 function matchesExceptPeriod(t: Txn, f: ActiveFilters, haystack: string) {
   return (
-    (f.kind === "ALL" || (f.kind === "REVIEW" ? needsReview(t) : t.is_parsed && t.type === f.kind)) &&
+    (f.kind === "ALL" ||
+      (f.kind === "REVIEW" ? needsReview(t) : f.kind === "REFUND" ? t.refund === "expected" : t.is_parsed && t.type === f.kind)) &&
     (f.category === ALL || (t.is_parsed && categoryName(t) === f.category)) &&
     (!f.tag || t.tags.includes(f.tag)) &&
     (!f.searchTag || t.tags.includes(f.searchTag)) &&
@@ -279,6 +280,7 @@ export function ActivityView() {
   );
 
   const reviewCount = useMemo(() => txns.filter(needsReview).length, [txns]);
+  const refundCount = useMemo(() => txns.filter((t) => t.refund === "expected").length, [txns]);
 
   const filteredExceptPeriod = useMemo(
     () => txns.filter((t) => matchesExceptPeriod(t, filters, searchable.get(t.id) ?? "")),
@@ -423,6 +425,8 @@ export function ActivityView() {
     { value: "DEBIT", label: "Expenses" },
     { value: "CREDIT", label: "Income" },
     { value: "REVIEW", label: "Needs review" },
+    // Only while a refund is expected, or while chosen (so it doesn't vanish under you when the last one closes).
+    ...(refundCount || kind === "REFUND" ? [{ value: "REFUND" as const, label: "Refund expected" }] : []),
   ];
 
   return (
@@ -510,6 +514,11 @@ export function ActivityView() {
             {chip.value === "REVIEW" && reviewCount ? (
               <span className={cx("rounded-full px-1.5 text-[11px] leading-4", kind === "REVIEW" ? "bg-canvas/20" : "bg-warn-soft text-warn")}>
                 {reviewCount}
+              </span>
+            ) : null}
+            {chip.value === "REFUND" && refundCount ? (
+              <span className={cx("rounded-full px-1.5 text-[11px] leading-4", kind === "REFUND" ? "bg-canvas/20" : "bg-violet-soft text-violet-strong")}>
+                {refundCount}
               </span>
             ) : null}
           </button>
@@ -696,14 +705,22 @@ export function ActivityView() {
               <Card className="flex flex-col items-center p-8 text-center">
                 <SearchX size={28} className="text-ink-3" aria-hidden />
                 <p className="mt-3 font-medium text-ink">
-                  {txns.length === 0 ? "No transactions yet" : kind === "REVIEW" ? "Nothing needs review" : "No matching transactions"}
+                  {txns.length === 0
+                    ? "No transactions yet"
+                    : kind === "REVIEW"
+                      ? "Nothing needs review"
+                      : kind === "REFUND"
+                        ? "No refunds expected"
+                        : "No matching transactions"}
                 </p>
                 <p className="mt-1 text-sm text-ink-2">
                   {txns.length === 0
                     ? "Bank SMS forwarded by your iPhone Shortcut will show up here. Paid in cash? Tap Add."
                     : kind === "REVIEW"
                       ? "No unreadable SMS or possible duplicates."
-                      : "Try a different search or filter."}
+                      : kind === "REFUND"
+                        ? "Open a payment and tap “Expect a refund” to keep track of it."
+                        : "Try a different search or filter."}
                 </p>
                 {filtersActive && txns.length > 0 ? (
                   <button type="button" onClick={resetFilters} className="mt-4 h-10 rounded-full bg-ink px-5 text-sm font-semibold text-canvas">

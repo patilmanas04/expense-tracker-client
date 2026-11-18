@@ -12,7 +12,7 @@ import { Segmented } from "./ui";
 /** The "Auto (from the name)" category: the server picks it. */
 export const AUTO = "";
 
-const FIELD =
+export const FIELD =
   "h-12 w-full rounded-2xl border border-line bg-surface px-4 text-[16px] text-ink outline-none placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15";
 
 /** "2026-10-22T14:05" in this device's time zone, for <input type="datetime-local">. */
@@ -171,7 +171,7 @@ export function TransactionFields({
   );
 }
 
-function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
+export function Field({ id, label, children }: { id: string; label: string; children: ReactNode }) {
   return (
     <div className="mt-4">
       <label htmlFor={id} className="mb-1.5 block text-[13px] font-medium text-ink-2">

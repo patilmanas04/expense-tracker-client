@@ -75,7 +75,7 @@ export function TransactionRow({ t }: { t: Txn }) {
         )}
         <span className="min-w-0 flex-1">
           <span className={cx("block truncate text-[16px] font-semibold", held ? "text-ink-2" : "text-ink")}>{transactionTitle(t)}</span>
-          <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
+          <span className="@container mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
             <CornerDownRight size={14} className="shrink-0 text-ink-3" aria-hidden />
             {held ? (
               // Only the chip: with the category beside it, it overran the amount on narrow phones.
@@ -84,13 +84,29 @@ export function TransactionRow({ t }: { t: Txn }) {
                 Possible duplicate
               </span>
             ) : t.is_parsed ? (
-              <span className="flex min-w-0 items-center gap-1.5">
+              // One chip at most: "Counts in" beside a refund chip overran the amount on phones, so the
+              // refund chip wins and the sheet still shows both. The category gives way first, down to
+              // about "Sh…": its basis is 0 and it only grows into what the chip leaves (up to its own
+              // width), so the chip keeps every pixel until then; after that the chip truncates.
+              // "Refund expected" is wide: when the line can't hold it beside "Sh…" (172 px, e.g. a 402 px
+              // phone with an account label under the amount), the category text goes (still read out;
+              // the dot and the tile carry it) so the chip shows in full.
+              <span className="flex min-w-0 items-center gap-1.5 overflow-hidden">
                 <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: categoryMeta(category).color }} />
-                <span className="truncate">{category}</span>
-                {carriedForward(t) ? (
+                <span className={cx("max-w-fit min-w-7 grow basis-0 truncate", t.refund === "expected" && "@max-[172px]:sr-only @max-[172px]:min-w-0")}>{category}</span>
+                {/* Read out by the sr-only text below, after the time. */}
+                {t.refund === "expected" ? (
+                  <span aria-hidden className="min-w-0 truncate rounded-full bg-violet-soft px-1.5 text-[11px] leading-4 font-medium text-violet-strong">
+                    Refund expected
+                  </span>
+                ) : t.refund === "refunded" || t.refund_for ? (
+                  <span aria-hidden className="min-w-0 truncate rounded-full bg-income-soft px-1.5 text-[11px] leading-4 font-medium text-income">
+                    Refunded
+                  </span>
+                ) : carriedForward(t) ? (
                   <span
                     title={`Counts toward ${monthLabel(t.countsIn)}`}
-                    className="shrink-0 rounded-full bg-income-soft px-1.5 text-[11px] leading-4 font-medium whitespace-nowrap text-income"
+                    className="min-w-0 truncate rounded-full bg-income-soft px-1.5 text-[11px] leading-4 font-medium text-income"
                   >
                     Counts in {monthShortName(t.countsIn)}
                   </span>
@@ -101,6 +117,10 @@ export function TransactionRow({ t }: { t: Txn }) {
             )}
             <span className="sr-only">, {timeLabel(t.transaction_time)}</span>
             {held ? <span className="sr-only">, possible duplicate, not counted</span> : null}
+            {!held && t.is_parsed && t.refund === "expected" ? <span className="sr-only">, refund expected</span> : null}
+            {!held && t.is_parsed && t.refund !== "expected" && (t.refund === "refunded" || t.refund_for) ? (
+              <span className="sr-only">, refunded</span>
+            ) : null}
           </span>
           {t.notes ? (
             <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">

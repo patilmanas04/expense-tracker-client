@@ -99,6 +99,7 @@ assert.equal(name({ period: { from: "2026-10-01" } }), "folio-from-2026-10-01-20
 assert.equal(name({ period: { to: "2026-10-15" } }), "folio-until-2026-10-15-2026-11-18.csv");
 assert.equal(name({ period: {} }), "folio-2026-11-18.csv");
 assert.equal(name({ kind: "REVIEW" }), "folio-review-2026-11-18.csv");
+assert.equal(name({ kind: "REFUND" }), "folio-refunds-2026-11-18.csv");
 assert.equal(name({ kind: "DEBIT" }), "folio-debits-2026-11-18.csv");
 assert.equal(name({ kind: "CREDIT" }), "folio-credits-2026-11-18.csv");
 assert.equal(

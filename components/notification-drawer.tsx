@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeAlert, BellOff, ChevronRight, Copy, CreditCard, Gauge, MessageSquareWarning, Repeat, TrendingUp, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgeAlert, BellOff, ChevronRight, Copy, CreditCard, Gauge, MessageSquareWarning, Repeat, TrendingUp, TriangleAlert, Undo2, Wallet, X, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -29,6 +29,8 @@ const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
   recurring_price: { icon: TrendingUp, color: "#F79009" },
   watchdog: { icon: MessageSquareWarning, color: "#F04438" },
   card_bill_due: { icon: CreditCard, color: "#F79009" },
+  refund_match: { icon: Undo2, color: "#12B76A" },
+  refund_overdue: { icon: Undo2, color: "#F79009" },
 };
 const DEFAULT_STYLE = { icon: Gauge, color: "#8458F5" };
 const kindStyle = (kind: string) => KIND_STYLES[kind] ?? DEFAULT_STYLE;

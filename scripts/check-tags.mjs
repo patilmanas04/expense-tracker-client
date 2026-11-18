@@ -77,7 +77,9 @@ const linkCases = [
   ["/activity?txn=abc-123", { txn: "abc-123" }],
   ["/activity?kind=review&tag=goa&utm=x", { kind: "REVIEW", tag: "goa" }],
   ["/activity", {}],
-  ["/activity?kind=refund", {}], // until doc 12
+  ["/activity?kind=refund", { kind: "REFUND" }],
+  ["/activity?kind=Refund&tag=goa", { kind: "REFUND", tag: "goa" }],
+  ["/activity?kind=refunds", {}],
   ["/settings/limits", null],
   ["/settings#limits", null],
   ["/activityx?kind=review", null],

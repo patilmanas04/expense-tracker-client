@@ -25,6 +25,10 @@ export interface Transaction {
   duplicate_of: string | null;
   /** Whose figure `balance` (the SMS's "Avl Bal") is: a bank account's balance, or a credit card's limit left; null without one. */
   balance_kind: "bank" | "card" | null;
+  /** A payment you expect money back for: "expected" until you confirm the refund, then "refunded"; null otherwise. */
+  refund: "expected" | "refunded" | null;
+  /** On a credit you confirmed as a refund: the payment it refunded. */
+  refund_for: string | null;
 }
 
 /** Mirrors `ManualTransactionInput` in the backend's main.py. */
@@ -401,4 +405,24 @@ export interface PayPeriod {
 export interface PayPeriods {
   enabled: boolean;
   periods: PayPeriod[];
+}
+
+/** Mirrors `RefundWatchOut` in the backend's refunds.py. */
+export interface RefundWatch {
+  transaction_id: string;
+  /** Decimal string, "2499.00". */
+  expected_amount: string;
+  /** "YYYY-MM-DD" (IST). */
+  due_date: string;
+  credit_id: string | null;
+  state: "expected" | "refunded";
+}
+
+/** Body of `POST /api/v1/refunds`. */
+export interface RefundWatchInput {
+  transaction_id: string;
+  /** Plain decimal string, e.g. "2499". */
+  amount: string;
+  /** "YYYY-MM-DD", 1 to 60 days from today (IST). */
+  due_date: string;
 }

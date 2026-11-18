@@ -68,6 +68,8 @@ export function prepare(list: Transaction[]): Txn[] {
       updated_at: asUtc(t.updated_at ?? t.created_at),
       duplicate_of: t.duplicate_of ?? null, // an older backend doesn't send it: not held out
       balance_kind: t.balance_kind ?? null, // an older backend doesn't send it
+      refund: t.refund ?? null, // an older backend doesn't send them
+      refund_for: t.refund_for ?? null,
       minor: toMinor(t.amount),
       day,
       month: monthOf(day),
