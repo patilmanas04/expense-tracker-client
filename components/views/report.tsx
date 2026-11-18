@@ -24,11 +24,12 @@ import { useData } from "../data-provider";
 import { CategoryCard, HabitsCard, MerchantList, PaceCard, toSegments } from "../insight-cards";
 import { TrendCard } from "../trend-card";
 import { Card, Segmented, SelectPill, cx } from "../ui";
+import { hasRecurringCard, RecurringCard } from "./recurring";
 
 const CATEGORY_PREVIEW = 6;
 
 export function ReportView() {
-  const { txns, month, setMonth, months, currency, today, requestActivity, openTransaction } = useData();
+  const { txns, month, setMonth, months, currency, today, requestActivity, openTransaction, recurring } = useData();
   const router = useRouter();
   const [type, setType] = useState<TxType>("DEBIT");
   const [chart, setChart] = useState<"donut" | "bars">("donut");
@@ -84,8 +85,8 @@ export function ReportView() {
         ]}
       />
 
-      {/* Phones: report, categories, pace, merchants, habits, cash flow (reference order).
-          Desktop: report/pace/merchants/habits stacked left, categories right, cash flow below both.
+      {/* Phones: report, categories, pace, merchants, habits, recurring, cash flow, trend (reference order).
+          Desktop: report/pace/merchants/habits stacked left, categories right, recurring, cash flow and trend below both.
           grid-cols-1 (minmax(0, 1fr)) keeps the phone column at the screen's width: an implicit
           `auto` column would grow to fit a long merchant name and push the page sideways. */}
       <div className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2 lg:items-start">
@@ -187,13 +188,20 @@ export function ReportView() {
           ) : null}
         </section>
 
-        <Card className="order-6 p-5 sm:p-6 lg:order-none lg:col-span-2">
+        {/* Not tied to the month or Expenses/Income; left out entirely when empty, so no empty grid gap. */}
+        {hasRecurringCard(recurring) ? (
+          <div className="order-6 lg:order-none lg:col-span-2">
+            <RecurringCard />
+          </div>
+        ) : null}
+
+        <Card className="order-7 p-5 sm:p-6 lg:order-none lg:col-span-2">
           <h2 className="text-lg font-semibold tracking-tight text-ink">Cash flow</h2>
           <p className="mt-0.5 mb-4 text-sm text-ink-2">Income and expenses, last 6 months</p>
           <TrendBars data={trend} currency={currency} />
         </Card>
 
-        <div className="order-7 lg:order-none lg:col-span-2">
+        <div className="order-8 lg:order-none lg:col-span-2">
           <TrendCard txns={txns} month={month} currency={currency} today={today} />
         </div>
       </div>

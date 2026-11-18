@@ -1,6 +1,7 @@
 import type {
   Balance,
   BalanceBreakdown,
+  Cadence,
   CategoryRule,
   CategoryRuleInput,
   Inbox,
@@ -12,6 +13,8 @@ import type {
   MerchantPreview,
   NameSaved,
   NewTransaction,
+  RecurringDecision,
+  RecurringSummary,
   RulePreview,
   RuleSaved,
   Settings,
@@ -224,6 +227,21 @@ export const updateRule = (id: string, input: CategoryRuleInput, apply_to_past: 
 
 /** Categories the rule set stay. */
 export const deleteRule = (id: string) => request<void>(`/api/v1/rules/${id}`, { method: "DELETE" });
+
+/** Payments to the same merchant about every week, month or year; `hidden` = marked Not recurring. */
+export const getRecurring = () => request<RecurringSummary>("/api/v1/recurring");
+
+/** Saves (or replaces) the decision on one series: Not recurring ("dismissed") or Mark cancelled ("cancelled"). */
+export const setRecurringDecision = (body: { merchant_key: string; cadence: Cadence; status: RecurringDecision }) =>
+  request<void>("/api/v1/recurring/decisions", { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(body) });
+
+/** Removes the decision (Show again / Not cancelled); fine when there was none. */
+export const clearRecurringDecision = (body: { merchant_key: string; cadence: Cadence }) =>
+  request<void>("/api/v1/recurring/decisions/clear", {
+    method: "POST",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(body),
+  });
 
 export const sendTestEmail = () => request<{ status: string; to: string }>("/api/v1/limits/test-email", { method: "POST" });
 

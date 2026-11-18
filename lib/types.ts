@@ -258,6 +258,44 @@ export interface RuleSaved {
   changed: number;
 }
 
+/** How often a recurring series is paid (server: recurring.CADENCES). */
+export type Cadence = "weekly" | "monthly" | "yearly";
+
+/** Mirrors `RecurringSeriesOut` in the backend's recurring.py. Amounts are decimal strings, dates "YYYY-MM-DD" (IST). */
+export interface RecurringSeries {
+  /** The merchant name casefolded with spaces collapsed; with `cadence`, what a decision is saved against. */
+  merchant_key: string;
+  /** The newest payment's merchant, spaces collapsed. */
+  name: string;
+  cadence: Cadence;
+  /** The newest payment: the current price. */
+  amount: string;
+  /** The price before, set only while it differs from `amount` by more than both 5% and ₹10. */
+  previous_amount: string | null;
+  /** Payments in the run (within the 855-day window). */
+  payments: number;
+  first_date: string;
+  last_date: string;
+  /** `last_date` plus the median gap (whole days). */
+  next_expected: string;
+  /** Today is more than a quarter of a period past `next_expected`. */
+  late: boolean;
+  /** "cancelled": marked cancelled with no payment since; "dismissed": Not recurring (only in `hidden`). */
+  status: "active" | "cancelled" | "dismissed";
+}
+
+/** Mirrors `RecurringSummary` in recurring.py: `items` = active (late first, then by next date) then cancelled; `hidden` = Not recurring. */
+export interface RecurringSummary {
+  currency: string;
+  /** Active series only, per month at current prices, whole rupees sent with two decimals ("24067.00"). */
+  monthly_total: string;
+  items: RecurringSeries[];
+  hidden: RecurringSeries[];
+}
+
+/** A decision on a series (server: recurring_decisions.status); clearing it is a separate call. */
+export type RecurringDecision = "dismissed" | "cancelled";
+
 /** Every setting (server: settings_store.KEYS). Later designs add their keys here. */
 export interface Settings {
   /** Whole rupees; null = Off. */

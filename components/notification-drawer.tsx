@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeAlert, BellOff, ChevronRight, Copy, Gauge, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
+import { BadgeAlert, BellOff, ChevronRight, Copy, Gauge, Repeat, TrendingUp, TriangleAlert, Wallet, X, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 
@@ -25,6 +25,8 @@ const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
   duplicate: { icon: Copy, color: "#EDA100" },
   payment_alert: { icon: BadgeAlert, color: "#F04438" },
   low_balance: { icon: Wallet, color: "#F04438" },
+  recurring_new: { icon: Repeat, color: "#8458F5" },
+  recurring_price: { icon: TrendingUp, color: "#F79009" },
 };
 const DEFAULT_STYLE = { icon: Gauge, color: "#8458F5" };
 const kindStyle = (kind: string) => KIND_STYLES[kind] ?? DEFAULT_STYLE;
@@ -225,7 +227,7 @@ export function NotificationDrawer() {
                 <BellOff size={24} aria-hidden />
               </span>
               <p className="mt-4 font-semibold text-ink">No notifications</p>
-              <p className="mt-1 text-sm text-ink-2">You&apos;ll be notified here when spending reaches your weekly or monthly limit.</p>
+              <p className="mt-1 text-sm text-ink-2">You&apos;ll be notified here when spending reaches a limit or a recurring payment is found or changes price.</p>
               <button
                 type="button"
                 onClick={() => go(LIMITS_PATH)}

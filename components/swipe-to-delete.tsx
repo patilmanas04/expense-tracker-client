@@ -1,6 +1,6 @@
 "use client";
 
-import { Trash2 } from "lucide-react";
+import { Trash2, type LucideIcon } from "lucide-react";
 import { useEffect, useRef, useState, useSyncExternalStore, type PointerEvent, type ReactNode } from "react";
 
 import { cx } from "./ui";
@@ -33,12 +33,14 @@ type Drag = { id: number; x: number; y: number; from: number; horizontal: boolea
  * opening another row closes it. Vertical scrolling is left to the browser (`touch-action: pan-y`).
  *
  * `removes`: the row disappears after deleting (it collapses first); otherwise it slides back.
+ * `icon`: shown above `label` on the red action (a bin unless given).
  * If `onDelete` throws, the row comes back.
  */
 export function SwipeToDelete({
   id,
   onDelete,
   label = "Delete",
+  icon: Icon = Trash2,
   disabled = false,
   removes = true,
   className,
@@ -48,6 +50,7 @@ export function SwipeToDelete({
   id: string;
   onDelete: () => void | Promise<unknown>;
   label?: string;
+  icon?: LucideIcon;
   disabled?: boolean;
   removes?: boolean;
   className?: string;
@@ -215,7 +218,7 @@ export function SwipeToDelete({
             transition: dragging ? `transform 160ms ${EASE}` : `transform 200ms ${EASE}`,
           }}
         >
-          <Trash2 size={20} aria-hidden />
+          <Icon size={20} aria-hidden />
           {label}
         </button>
       </div>

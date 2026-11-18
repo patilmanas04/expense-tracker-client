@@ -15,12 +15,14 @@ import {
   ApiError,
   addTransaction as apiAddTransaction,
   clearBalance as apiClearBalance,
+  clearRecurringDecision as apiClearRecurringDecision,
   deleteTransaction as apiDeleteTransaction,
   getAllTransactions,
   getBalance,
   getLimits,
   getMe,
   getNotifications,
+  getRecurring,
   getSettings,
   getTransactionsSince,
   clearNotifications as apiClearNotifications,
@@ -32,17 +34,21 @@ import {
   saveLimits as apiSaveLimits,
   saveMerchantLimit as apiSaveMerchantLimit,
   saveSettings as apiSaveSettings,
+  setRecurringDecision as apiSetRecurringDecision,
   signOut as apiSignOut,
   updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
 import { dayKey, monthOf } from "@/lib/format";
 import type {
   Balance,
+  Cadence,
   Inbox,
   LimitsInput,
   LimitsSummary,
   MerchantLimitInput,
   NewTransaction,
+  RecurringDecision,
+  RecurringSummary,
   Settings,
   TransactionPatch,
   User,
@@ -95,6 +101,18 @@ interface DataContextValue {
   saveLimits: (limits: LimitsInput) => Promise<LimitsSummary>;
   /** Adds, changes or removes one merchant's limit. */
   saveMerchantLimit: (body: MerchantLimitInput) => Promise<LimitsSummary>;
+  /** Recurring series (Report's card and /report/recurring); null until loaded. */
+  recurring: RecurringSummary | null;
+  /** The last load of `recurring` failed (it keeps its last value). */
+  recurringFailed: boolean;
+  /** Reloads `recurring`; never throws: resolves false when it failed (which also sets `recurringFailed`). */
+  refreshRecurring: () => Promise<boolean>;
+  /**
+   * Saves a decision on one series ("dismissed" = Not recurring, "cancelled" = Mark cancelled), or clears it
+   * with null, then reloads `recurring`. Throws ApiError when the write fails; resolves false when it saved
+   * but the reload failed (`recurring` still shows the series where it was).
+   */
+  decideRecurring: (merchantKey: string, cadence: Cadence, status: RecurringDecision | null) => Promise<boolean>;
   /** Alert settings and the like; null until loaded, or when the server didn't answer. */
   settings: Settings | null;
   /** Changes only the keys given. Throws ApiError; a 422 message names the key ("<key>: <message>"). */
@@ -217,12 +235,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const hiddenNotes = useRef(new Set<string>()); // swiped away or cleared; a poll in flight can't bring them back
   const [limits, setLimits] = useState<LimitsSummary | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null); // not polled; reloads with Sync
+  const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
+  const [recurringFailed, setRecurringFailed] = useState(false);
   const [notificationsOpenedAt, setNotificationsOpenedAt] = useState(0); // 0 = closed
   const inFlight = useRef(false);
   const lastSyncedRef = useRef(0);
   const cursorRef = useRef(EPOCH); // newest updated_at already loaded
   const pollFailures = useRef(0);
-  const limitsTxns = useRef<Txn[] | null>(null); // transactions the limits were last loaded for
+  const limitsTxns = useRef<Txn[] | null>(null); // transactions the limits and recurring were last loaded for
+  const reloadOptional = useRef(false); // the first load failed, so limits and recurring reload once it succeeds
   const deletedIds = useRef(new Set<string>()); // so a poll already in flight can't bring one back
   const pendingDelete = useRef<{ txn: Txn; timer: number } | null>(null); // waiting out its undo window
   const [deletion, setDeletion] = useState<Deletion | null>(null);
@@ -252,7 +273,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setStatus("expired");
     } else {
       setError(result.message);
-      if (initial) setStatus("error"); // otherwise keep showing the last good data
+      if (initial) {
+        setStatus("error"); // otherwise keep showing the last good data
+        reloadOptional.current = true; // their own loads likely failed with it
+      }
     }
     setRefreshing(false);
   }, []);
@@ -300,6 +324,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     [],
   );
 
+  // Optional too; a failure keeps the last value and is flagged so the Recurring screen can offer Try again.
+  const loadRecurring = useCallback(
+    () =>
+      getRecurring().then(
+        (next) => {
+          setRecurring((current) => (same(current, next) ? current : next));
+          setRecurringFailed(false);
+          return true;
+        },
+        () => {
+          setRecurringFailed(true);
+          return false;
+        },
+      ),
+    [],
+  );
+
   useEffect(() => {
     let cancelled = false;
     inFlight.current = true;
@@ -310,17 +351,23 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
     // In parallel, so Settings opens with the meters already filled in.
     void loadLimits();
+    void loadRecurring();
     return () => {
       cancelled = true;
     };
-  }, [apply, loadLimits, drainQueued]);
+  }, [apply, loadLimits, loadRecurring, drainQueued]);
 
-  // New SMS change what's been spent: refresh the meters (the first load already has them).
+  // New SMS change what's been spent and what recurs: refresh the meters and recurring. The first load already
+  // has them, unless it failed and a retry (Try again, coming back to the tab) is what made the app ready.
   useEffect(() => {
     if (status !== "ready") return;
-    if (limitsTxns.current !== null && limitsTxns.current !== txns) void loadLimits();
+    if (limitsTxns.current === null ? reloadOptional.current : limitsTxns.current !== txns) {
+      void loadLimits();
+      void loadRecurring();
+    }
+    reloadOptional.current = false;
     limitsTxns.current = txns;
-  }, [status, txns, loadLimits]);
+  }, [status, txns, loadLimits, loadRecurring]);
 
   // Coming back to the tab/home-screen app picks up SMS that arrived meanwhile.
   useEffect(() => {
@@ -405,6 +452,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setInbox(EMPTY_INBOX);
       setLimits(null);
       setSettings(null);
+      setRecurring(null);
+      setRecurringFailed(false);
       setSelectedId(null);
       setStatus("signed-out");
     }
@@ -430,6 +479,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setLimits(next);
     return next;
   }, []);
+
+  const decideRecurring = useCallback(
+    async (merchantKey: string, cadence: Cadence, status: RecurringDecision | null) => {
+      if (status) await apiSetRecurringDecision({ merchant_key: merchantKey, cadence, status });
+      else await apiClearRecurringDecision({ merchant_key: merchantKey, cadence });
+      return loadRecurring(); // the decision is saved either way; false = the list couldn't reload
+    },
+    [loadRecurring],
+  );
 
   const saveSettings = useCallback(async (changes: Partial<Settings>) => {
     const next = await apiSaveSettings(changes);
@@ -492,6 +550,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
           settle(txn.id); // views showing the server's figures (the balance breakdown) refetch on this
           void reloadBalance();
           void loadLimits();
+          // The list changed on screen before the server deleted it, so the txns effect reloaded too early.
+          void loadRecurring();
         },
         () => {
           // Nothing disappears silently: put it back and say so.
@@ -502,7 +562,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
         },
       );
     },
-    [reloadBalance, loadLimits, settle],
+    [reloadBalance, loadLimits, loadRecurring, settle],
   );
 
   /** Sends the delete waiting for its undo window right away; true if there was one. */
@@ -638,6 +698,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       limits,
       saveLimits,
       saveMerchantLimit,
+      recurring,
+      recurringFailed,
+      refreshRecurring: loadRecurring,
+      decideRecurring,
       settings,
       saveSettings,
       inbox,
@@ -686,6 +750,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       limits,
       saveLimits,
       saveMerchantLimit,
+      recurring,
+      recurringFailed,
+      loadRecurring,
+      decideRecurring,
       settings,
       saveSettings,
       inbox,
