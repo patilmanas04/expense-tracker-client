@@ -10,7 +10,7 @@ import { activityRequestFromLink } from "@/lib/links";
 import type { AppNotification } from "@/lib/types";
 
 import { useData } from "./data-provider";
-import { useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, useSheetDrag } from "./sheet-drag";
 import { SwipeToDelete } from "./swipe-to-delete";
 import { IconTile, cx } from "./ui";
 
@@ -60,8 +60,7 @@ export function NotificationDrawer() {
   useEffect(() => {
     if (!notificationsOpen) return;
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeNotifications();
@@ -79,7 +78,7 @@ export function NotificationDrawer() {
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };
