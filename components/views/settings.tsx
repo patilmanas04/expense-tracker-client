@@ -377,9 +377,12 @@ function parseRupees(text: string, max: number): number | null {
   return rupees >= 1 && rupees <= max ? rupees : null;
 }
 
-/** Payment alerts (notifications in the bell): large payments and payments unusual for the merchant. */
+/**
+ * Alerts (notifications in the bell): large payments, payments unusual for the merchant, and the SMS
+ * watchdog (a daily check that bank SMS still arrive, salary isn't late and SMS can be read).
+ */
 function AlertsSection() {
-  const { settings, saveSettings } = useData();
+  const { settings, saveSettings, limits } = useData();
   return (
     <section id="alerts" className="mt-6 scroll-mt-6">
       <h2 className="mb-2 px-1 text-[15px] text-ink-2">Alerts</h2>
@@ -397,7 +400,19 @@ function AlertsSection() {
               max={LARGE_AMOUNT_MAX}
               help={LARGE_AMOUNT_HELP}
             />
-            <UnusualRow saved={settings["alerts.unusual"]} save={saveSettings} />
+            <SwitchSettingRow
+              settingKey="alerts.unusual"
+              saved={settings["alerts.unusual"]}
+              save={saveSettings}
+              label="Unusual for the merchant"
+              hint="When a payment is at least 3× what you usually spend there, and ₹500 or more."
+            />
+            <WatchdogRows
+              settings={settings}
+              save={saveSettings}
+              emailConfigured={limits?.email.configured === true}
+              emailTo={limits?.email.to ?? null}
+            />
           </>
         ) : (
           <p className="p-4 text-[13px] text-ink-2">Alert settings aren&apos;t available right now. Tap Sync below to try again.</p>
@@ -560,8 +575,20 @@ function AmountSettingRow({
   );
 }
 
-/** "Unusual for the merchant": saves as soon as it's flipped. */
-function UnusualRow({ saved, save }: { saved: boolean; save: SaveSettings }) {
+/** An on/off setting that saves as soon as it's flipped. */
+function SwitchSettingRow({
+  settingKey,
+  saved,
+  save,
+  label,
+  hint,
+}: {
+  settingKey: "alerts.unusual" | "watchdog.enabled" | "watchdog.salary_check" | "watchdog.email";
+  saved: boolean;
+  save: SaveSettings;
+  label: string;
+  hint: string;
+}) {
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -569,7 +596,7 @@ function UnusualRow({ saved, save }: { saved: boolean; save: SaveSettings }) {
     setBusy(true);
     setError(null);
     try {
-      await save({ "alerts.unusual": on });
+      await save({ [settingKey]: on } as Partial<Settings>);
     } catch (err) {
       setError(settingError(err, "Couldn't save this setting."));
     } finally {
@@ -581,10 +608,116 @@ function UnusualRow({ saved, save }: { saved: boolean; save: SaveSettings }) {
     <div className="p-4">
       <div className="flex items-center gap-3">
         <div className="min-w-0 flex-1">
-          <p className="text-[15px] text-ink">Unusual for the merchant</p>
-          <p className="text-[13px] text-ink-2">When a payment is at least 3× what you usually spend there, and ₹500 or more.</p>
+          <p className="text-[15px] text-ink">{label}</p>
+          <p className="text-[13px] break-words text-ink-2">{hint}</p>
         </div>
-        <Switch label="Unusual for the merchant" checked={saved} onChange={(on) => void toggle(on)} disabled={busy} />
+        <Switch label={label} checked={saved} onChange={(on) => void toggle(on)} disabled={busy} />
+      </div>
+      {error ? (
+        <p role="alert" className="mt-2 text-[13px] font-medium text-expense">
+          {error}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/** "Warn after": 2 to 14 days (server: settings_store, watchdog.quiet_days). */
+const QUIET_DAY_OPTIONS = Array.from({ length: 13 }, (_, i) => ({ value: String(i + 2), label: `${i + 2} days` }));
+
+/** SMS watchdog (server watchdog.py, every evening at 9 pm IST): its switch, and the rest only while it's on. */
+function WatchdogRows({
+  settings,
+  save,
+  emailConfigured,
+  emailTo,
+}: {
+  settings: Settings;
+  save: SaveSettings;
+  emailConfigured: boolean;
+  emailTo: string | null;
+}) {
+  // An older server doesn't send these: the server's defaults.
+  const enabled = settings["watchdog.enabled"] !== false;
+  const salaryCheck = settings["watchdog.salary_check"] !== false;
+  const email = settings["watchdog.email"] !== false;
+  const quietDays = settings["watchdog.quiet_days"] ?? 4; // an older server doesn't send it
+
+  return (
+    <>
+      <SwitchSettingRow
+        settingKey="watchdog.enabled"
+        saved={enabled}
+        save={save}
+        label="SMS watchdog"
+        hint="A check every evening at 9 pm: warns when bank SMS stop arriving, salary is late, or SMS can't be read."
+      />
+      {enabled ? (
+        <>
+          <QuietDaysRow saved={quietDays} save={save} />
+          <SwitchSettingRow
+            settingKey="watchdog.salary_check"
+            saved={salaryCheck}
+            save={save}
+            label="Late salary"
+            hint="When salary (category Salary) is more than 3 days past its usual date."
+          />
+          {emailConfigured ? (
+            <SwitchSettingRow
+              settingKey="watchdog.email"
+              saved={email}
+              save={save}
+              label="Email these warnings"
+              hint={emailTo ? `Also send them to ${emailTo}.` : "Also send them by email."}
+            />
+          ) : null}
+          <div className="space-y-2 p-4 text-[13px] text-ink-2">
+            <p>
+              If a warning says SMS stopped: on your iPhone, open Shortcuts → Automation and check that the bank-SMS automation is
+              still on and runs immediately.
+            </p>
+            <p>If your server sleeps when idle, set up its daily trigger (see the server README) so this check still runs.</p>
+          </div>
+        </>
+      ) : null}
+    </>
+  );
+}
+
+/** "Warn after": days with no bank SMS before the watchdog warns; saved as soon as it's picked. */
+function QuietDaysRow({ saved, save }: { saved: number; save: SaveSettings }) {
+  const [pending, setPending] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const shown = pending ?? String(saved);
+
+  const choose = async (value: string) => {
+    setPending(value);
+    setError(null);
+    try {
+      await save({ "watchdog.quiet_days": Number(value) });
+    } catch (err) {
+      setError(settingError(err, "Couldn't save this setting."));
+    } finally {
+      setPending(null);
+    }
+  };
+
+  return (
+    <div className="p-4">
+      <div className="flex items-center gap-3">
+        <div className="min-w-0 flex-1">
+          <p className="text-[15px] text-ink">Warn after</p>
+          <p className="text-[13px] text-ink-2">Days with no bank SMS before a warning.</p>
+        </div>
+        <SelectPill
+          label="Warn after"
+          size="sm"
+          value={shown}
+          onChange={(value) => void choose(value)}
+          options={QUIET_DAY_OPTIONS}
+          className="shrink-0"
+        />
       </div>
       {error ? (
         <p role="alert" className="mt-2 text-[13px] font-medium text-expense">

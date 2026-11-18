@@ -307,6 +307,14 @@ export interface Settings {
   "alerts.low_balance": number | null;
   /** Months start on payday (pay_periods.py); default false. */
   "periods.payday": boolean;
+  /** SMS watchdog (server watchdog.py): a daily 9 pm check of the SMS pipeline; default true. */
+  "watchdog.enabled": boolean;
+  /** Days with no bank SMS before a warning, 2–14; default 4. */
+  "watchdog.quiet_days": number;
+  /** Warn when salary is more than 3 days past its usual date; default true. */
+  "watchdog.salary_check": boolean;
+  /** Also email watchdog warnings (used only when Gmail is configured on the server); default true. */
+  "watchdog.email": boolean;
 }
 
 /** One pay period (server: pay_periods.PayPeriodOut). IST "YYYY-MM-DD"; `end` inclusive (the newest one's is its latest end). */
