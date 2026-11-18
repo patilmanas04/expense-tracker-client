@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Txn } from "@/lib/analytics";
 
 import { useData } from "./data-provider";
-import { useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, useSheetDrag } from "./sheet-drag";
 import { AUTO, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 
 /** Add a transaction by hand (cash, or anything without an SMS): bottom sheet on phones, dialog on desktop. */
@@ -35,8 +35,7 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     amountRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -54,7 +53,7 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };

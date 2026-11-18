@@ -11,7 +11,7 @@ import { cameFromApp } from "@/lib/nav-history";
 import type { CategoryRule, CategoryRuleInput, MerchantName, RulePreview, RuleSaved } from "@/lib/types";
 
 import { useData } from "../data-provider";
-import { useSheetDrag } from "../sheet-drag";
+import { lockPageScroll, useSheetDrag } from "../sheet-drag";
 import { SwipeToDelete } from "../swipe-to-delete";
 import { Card, CategoryTile, CheckRow, cx, IconTile, Segmented } from "../ui";
 
@@ -378,8 +378,7 @@ function RuleSheet({
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     firstRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       // Escape while an IME is composing (229: Safari's key code for it) cancels the composition, not the sheet.
@@ -396,7 +395,7 @@ function RuleSheet({
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       // Not when it went with a deleted rule (the page then moves focus itself).
       if (previouslyFocused?.isConnected) previouslyFocused.focus?.();

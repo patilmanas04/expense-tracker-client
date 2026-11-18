@@ -21,7 +21,7 @@ import { cameFromApp } from "@/lib/nav-history";
 import type { KnownMerchant, LimitsSummary, MerchantLimitStatus, MerchantPreview, PeriodLimit } from "@/lib/types";
 
 import { useData } from "../data-provider";
-import { useSheetDrag } from "../sheet-drag";
+import { lockPageScroll, useSheetDrag } from "../sheet-drag";
 import { SwipeToDelete } from "../swipe-to-delete";
 import { Card, CategoryTile, cx, IconTile, ProgressBar, Segmented, SelectPill } from "../ui";
 
@@ -322,8 +322,7 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     // The merchant field when it's there (adding a merchant), otherwise the weekly limit.
     (merchantRef.current ?? weeklyRef.current)?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
@@ -344,7 +343,7 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };

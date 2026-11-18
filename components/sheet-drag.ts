@@ -75,3 +75,22 @@ export function useSheetDrag(sheetRef: RefObject<HTMLDivElement | null>, onClose
 
   return { backdropRef, grabProps };
 }
+
+/**
+ * Stop the page scrolling behind an open sheet; returns the undo. The lock goes on <html>, not
+ * <body>: <html> has `overflow-x: clip`, so a body `overflow: hidden` isn't passed on to the page
+ * and only turns <body> into a scroll box of its own, which leaves the page scrollable and unpins
+ * Home's sticky header (it jumps to the top of the page behind the sheet). A classic desktop
+ * scroll bar goes away with the lock, so its width is padded back to keep the page from shifting.
+ */
+export function lockPageScroll() {
+  const root = document.documentElement;
+  const { overflow, paddingRight } = root.style;
+  const bar = window.innerWidth - root.clientWidth;
+  root.style.overflow = "hidden";
+  if (bar > 0) root.style.paddingRight = `${bar}px`;
+  return () => {
+    root.style.overflow = overflow;
+    root.style.paddingRight = paddingRight;
+  };
+}

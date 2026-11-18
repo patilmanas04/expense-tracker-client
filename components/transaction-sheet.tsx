@@ -13,7 +13,7 @@ import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
 import type { TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
-import { useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, useSheetDrag } from "./sheet-drag";
 import { TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 import { TagChips, transactionTitle } from "./transactions";
 import { Amount, CategoryTile, CheckRow, cx } from "./ui";
@@ -65,8 +65,7 @@ function SheetBody({ t }: { t: Txn }) {
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented) return; // the note box handled it
@@ -95,7 +94,7 @@ function SheetBody({ t }: { t: Txn }) {
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };

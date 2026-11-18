@@ -3,7 +3,7 @@
 import { X } from "lucide-react";
 import { useEffect, useRef, useState, type Ref } from "react";
 
-import { useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, useSheetDrag } from "./sheet-drag";
 import type { AmountText } from "./views/activity";
 
 const INPUT =
@@ -34,8 +34,7 @@ export function MoreFiltersSheet({
 
   useEffect(() => {
     const previouslyFocused = document.activeElement as HTMLElement | null;
-    const { overflow } = document.body.style;
-    document.body.style.overflow = "hidden";
+    const unlockScroll = lockPageScroll();
     minRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
@@ -53,7 +52,7 @@ export function MoreFiltersSheet({
     };
     document.addEventListener("keydown", onKey);
     return () => {
-      document.body.style.overflow = overflow;
+      unlockScroll();
       document.removeEventListener("keydown", onKey);
       previouslyFocused?.focus?.();
     };

@@ -3,7 +3,7 @@
 import { BadgeIndianRupee, Bell, ChevronRight, PiggyBank, Search, Sparkles, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useMemo } from "react";
+import { useMemo, useRef } from "react";
 
 import {
   buildInsight,
@@ -18,6 +18,7 @@ import { formatMoney, formatPercent, monthName, shortDayLabel } from "@/lib/form
 
 import { Donut } from "../charts/donut";
 import { useData } from "../data-provider";
+import { useSheetCorners } from "../home-sheet-corners";
 import { PaceCard, toSegments } from "../insight-cards";
 import { TransactionGroups } from "../transactions";
 import { Amount, Avatar, Card, IconButton, IconTile, InfoTip, SectionHeader, SelectPill, cx } from "../ui";
@@ -27,6 +28,8 @@ const RECENT_LIMIT = 8;
 export function HomeView() {
   const { txns, month, setMonth, months, currency, today, cal, user, requestActivity, inbox, openNotifications } = useData();
   const router = useRouter();
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useSheetCorners(sheetRef);
 
   const totals = useMemo(() => monthTotals(txns, month, currency), [txns, month, currency]);
   const comparison = useMemo(() => compareWithPrevious(txns, month, currency, today, cal), [txns, month, currency, today, cal]);
@@ -61,8 +64,8 @@ export function HomeView() {
     <div className="mx-auto max-w-6xl lg:px-8 lg:pt-8">
       <div className="lg:grid lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)] lg:items-start lg:gap-6">
         <div>
-          {/* Violet header */}
-          <section className="hero-bg relative overflow-hidden px-5 pt-safe pb-16 text-white sm:px-8 lg:rounded-[32px] lg:pt-6 lg:pb-10">
+          {/* Violet header, pinned on phones while the content sheet scrolls up over it */}
+          <section className="hero-bg sticky top-0 z-0 overflow-hidden px-5 pt-safe pb-16 text-white sm:px-8 lg:relative lg:z-auto lg:rounded-[32px] lg:pt-6 lg:pb-10">
             <div className="flex items-center justify-between gap-3 pt-1">
               <Link href="/settings" aria-label="Settings" className="shrink-0 rounded-full">
                 <Avatar name={user?.name || user?.email || "Folio"} picture={user?.picture} />
@@ -102,8 +105,12 @@ export function HomeView() {
             </div>
           </section>
 
-          {/* Content sheet that overlaps the header on phones */}
-          <div className="relative -mt-9 rounded-t-[32px] bg-canvas px-4 pt-6 sm:px-6 lg:mt-6 lg:rounded-none lg:bg-transparent lg:px-0 lg:pt-0">
+          {/* Content sheet that overlaps the header on phones and slides up over it as the page
+              scrolls; its top corners square off as it reaches the top (see home-sheet-corners.ts) */}
+          <div
+            ref={sheetRef}
+            className="home-sheet relative z-10 -mt-9 rounded-t-(--home-radius) bg-canvas px-4 pt-6 sm:px-6 lg:z-auto lg:mt-6 lg:rounded-none lg:bg-transparent lg:px-0 lg:pt-0"
+          >
             <SectionHeader
               title="Your Money"
               action={

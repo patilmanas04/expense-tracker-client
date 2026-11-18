@@ -126,6 +126,46 @@ body {
     linear-gradient(160deg, #5a2fd1 0%, #6a45e0 48%, #7c5ae6 100%);
 }
 
+/* Home's content sheet slides up over the pinned violet header on phones, and its top corners
+   square off as its top nears the top of the screen: 32px while it's 80px or more below, 0 once
+   it gets there. The radius is a registered property so it can be animated; the sheet's own
+   `rounded-t-(--home-radius)` reads it, which leaves `lg:rounded-none` in charge on desktop.
+   Browsers with scroll-driven animations do it here; the others (iOS 18 and older, Firefox) get
+   the same values from useSheetCorners. Keep 32 and 80 in sync with components/home-sheet-corners.ts. */
+@property --home-radius {
+  syntax: "<length>";
+  inherits: false;
+  initial-value: 32px;
+}
+
+@keyframes home-sheet-corners {
+  from {
+    --home-radius: 32px;
+  }
+  to {
+    --home-radius: 0px;
+  }
+}
+
+@media (width < 64rem) {
+  @supports (animation-timeline: view()) {
+    .home-sheet {
+      animation: home-sheet-corners linear both;
+      /* After the shorthand, which resets it. */
+      animation-timeline: view();
+      animation-range: exit-crossing -80px exit-crossing 0%;
+    }
+
+    /* The corners follow the finger rather than playing on their own, so they stay on with
+       reduced motion; the global rule below would otherwise snap them straight to square. */
+    @media (prefers-reduced-motion: reduce) {
+      .home-sheet {
+        animation-duration: auto !important;
+      }
+    }
+  }
+}
+
 .fab-bg {
   background: linear-gradient(160deg, #ab86ff 0%, #8458f5 100%);
 }
