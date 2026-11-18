@@ -2,7 +2,7 @@
 
 import { BellOff, ChevronRight, Gauge, TriangleAlert, X, type LucideIcon } from "lucide-react";
 import { useRouter } from "next/navigation";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { timeAgo } from "@/lib/format";
 import type { AppNotification } from "@/lib/types";
@@ -16,6 +16,13 @@ const LIMITS_PATH = "/settings/limits";
 /** Where limit alerts linked before limits got a page of their own. */
 const OLD_LIMITS_PATH = "/settings#limits";
 
+/** Icon and colour per notification kind; later designs add one entry each. */
+const KIND_STYLES: Record<string, { icon: LucideIcon; color: string }> = {
+  spend_limit: { icon: Gauge, color: "#FF6F4F" },
+};
+const DEFAULT_STYLE = { icon: Gauge, color: "#8458F5" };
+const kindStyle = (kind: string) => KIND_STYLES[kind] ?? DEFAULT_STYLE;
+
 /** Notifications behind the bell on Home: bottom sheet on phones, side panel on desktop. */
 export function NotificationDrawer() {
   const {
@@ -27,6 +34,7 @@ export function NotificationDrawer() {
     markNotificationsRead,
     dismissNotification,
     clearNotifications,
+    runNotificationAction,
     requestActivity,
   } = useData();
   const router = useRouter();
@@ -34,6 +42,10 @@ export function NotificationDrawer() {
   const { backdropRef, grabProps } = useSheetDrag(panelRef, closeNotifications);
   const closeRef = useRef<HTMLButtonElement>(null);
   const review = txns.filter((t) => !t.is_parsed).length;
+  /** The notification whose button is being run; one at a time. */
+  const [running, setRunning] = useState<string | null>(null);
+  /** Error from a button, per notification, shown in its row until the next try. */
+  const [failed, setFailed] = useState<Record<string, string>>({});
 
   useEffect(() => {
     if (!notificationsOpen) return;
@@ -71,7 +83,26 @@ export function NotificationDrawer() {
   };
   const open = (n: AppNotification) => {
     if (!n.read) void markNotificationsRead([n.id]);
-    go(!n.link || n.link === OLD_LIMITS_PATH ? LIMITS_PATH : n.link);
+    if (!n.link) return; // nothing to open (notifications with buttons have no link)
+    go(n.link === OLD_LIMITS_PATH ? LIMITS_PATH : n.link);
+  };
+  const act = async (n: AppNotification, path: string) => {
+    if (running) return;
+    setRunning(n.id);
+    setFailed((current) => {
+      if (!(n.id in current)) return current;
+      const next = { ...current };
+      delete next[n.id];
+      return next;
+    });
+    if (!n.read) void markNotificationsRead([n.id]);
+    try {
+      await runNotificationAction(path);
+    } catch (e) {
+      setFailed((current) => ({ ...current, [n.id]: e instanceof Error ? e.message : "Something went wrong." }));
+    } finally {
+      setRunning(null);
+    }
   };
   const openReview = () => {
     requestActivity({ kind: "REVIEW" });
@@ -152,15 +183,26 @@ export function NotificationDrawer() {
                     className="rounded-card shadow-card"
                     contentClassName="rounded-card bg-canvas"
                   >
-                    <Row
-                      icon={Gauge}
-                      color={n.kind === "spend_limit" ? "#FF6F4F" : "#8458F5"}
-                      title={n.title}
-                      body={n.body}
-                      meta={timeAgo(n.created_at, notificationsOpenedAt)}
-                      unread={!n.read}
-                      onClick={() => open(n)}
-                    />
+                    {n.actions.length || n.resolved ? (
+                      <ActionRow
+                        {...kindStyle(n.kind)}
+                        notification={n}
+                        meta={timeAgo(n.created_at, notificationsOpenedAt)}
+                        busy={running === n.id}
+                        error={failed[n.id]}
+                        onOpen={() => open(n)}
+                        onAction={(path) => void act(n, path)}
+                      />
+                    ) : (
+                      <Row
+                        {...kindStyle(n.kind)}
+                        title={n.title}
+                        body={n.body}
+                        meta={timeAgo(n.created_at, notificationsOpenedAt)}
+                        unread={!n.read}
+                        onClick={() => open(n)}
+                      />
+                    )}
                   </SwipeToDelete>
                 </li>
               ))}
@@ -213,6 +255,33 @@ function Row({
         unread ? "border-violet/25 bg-surface" : "border-line/70 bg-surface/70",
       )}
     >
+      <RowText icon={icon} color={color} title={title} body={body} meta={meta} unread={unread} />
+      <span className="flex shrink-0 flex-col items-center gap-2 self-center">
+        {unread ? <span className="size-2 rounded-full bg-violet" aria-label="Unread" /> : null}
+        <ChevronRight size={16} className="text-ink-3" aria-hidden />
+      </span>
+    </button>
+  );
+}
+
+/** Icon tile, title, time and body: shared by both row kinds. */
+function RowText({
+  icon,
+  color,
+  title,
+  body,
+  meta,
+  unread,
+}: {
+  icon: LucideIcon;
+  color: string;
+  title: string;
+  body: string;
+  meta?: string;
+  unread: boolean;
+}) {
+  return (
+    <>
       <IconTile icon={icon} color={color} size="sm" />
       <span className="min-w-0 flex-1">
         <span className="flex items-baseline justify-between gap-2">
@@ -221,10 +290,70 @@ function Row({
         </span>
         <span className="mt-0.5 block text-[13px] leading-snug text-ink-2">{body}</span>
       </span>
-      <span className="flex shrink-0 flex-col items-center gap-2 self-center">
-        {unread ? <span className="size-2 rounded-full bg-violet" aria-label="Unread" /> : null}
-        <ChevronRight size={16} className="text-ink-3" aria-hidden />
-      </span>
-    </button>
+    </>
+  );
+}
+
+/** A notification with buttons: tapping the text only marks it read; once decided, the result replaces the buttons. */
+function ActionRow({
+  icon,
+  color,
+  notification: n,
+  meta,
+  busy,
+  error,
+  onOpen,
+  onAction,
+}: {
+  icon: LucideIcon;
+  color: string;
+  notification: AppNotification;
+  meta: string;
+  busy: boolean;
+  error?: string;
+  onOpen: () => void;
+  onAction: (path: string) => void;
+}) {
+  const unread = !n.read;
+  return (
+    <div className={cx("flex flex-col rounded-card border p-3.5", unread ? "border-violet/25 bg-surface" : "border-line/70 bg-surface/70")}>
+      <button
+        type="button"
+        onClick={onOpen}
+        className="flex w-full items-start gap-3 rounded-xl text-left focus-visible:outline-2 focus-visible:outline-violet"
+      >
+        <RowText icon={icon} color={color} title={n.title} body={n.body} meta={meta} unread={unread} />
+        {unread ? <span className="size-2 shrink-0 self-center rounded-full bg-violet" aria-label="Unread" /> : null}
+      </button>
+      <div className="pl-13">
+        {n.resolved ? (
+          <p className="mt-2 text-[13px] font-medium text-ink-2">{n.resolved}</p>
+        ) : (
+          <>
+            <div className="mt-3 flex flex-wrap gap-2" aria-busy={busy}>
+              {n.actions.map((a, i) => (
+                <button
+                  key={a.path}
+                  type="button"
+                  disabled={busy}
+                  onClick={() => onAction(a.path)}
+                  className={cx(
+                    "h-9 rounded-full px-4 text-sm transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50",
+                    i === 0 ? "bg-ink font-semibold text-canvas" : "border border-line bg-surface font-medium text-ink",
+                  )}
+                >
+                  {a.label}
+                </button>
+              ))}
+            </div>
+            {error ? (
+              <p role="alert" className="mt-2 text-[13px] text-expense">
+                {error}
+              </p>
+            ) : null}
+          </>
+        )}
+      </div>
+    </div>
   );
 }

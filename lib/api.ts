@@ -80,7 +80,19 @@ const withMerchants = (summary: LimitsSummary): LimitsSummary => ({ ...summary, 
 
 export const getLimits = () => request<LimitsSummary>("/api/v1/limits").then(withMerchants);
 
-export const getNotifications = () => request<Inbox>("/api/v1/notifications?limit=30");
+/** A backend from before notification actions sends no `actions` / `resolved`. */
+const withActions = (inbox: Inbox): Inbox => ({
+  ...inbox,
+  items: inbox.items.map((n) => ({ ...n, actions: n.actions ?? [], resolved: n.resolved ?? null })),
+});
+
+export const getNotifications = () => request<Inbox>("/api/v1/notifications?limit=30").then(withActions);
+
+/** A notification's button: a same-origin POST with no body to a path the server gave (always under /api/v1/). */
+export const runNotificationAction = (path: string) =>
+  path.startsWith("/api/v1/") && !path.includes("..")
+    ? request<unknown>(path, { method: "POST" })
+    : Promise.reject(new ApiError(0, "This action isn't available."));
 
 /** Swipe to delete: hides one notification (the alert still counts as sent, so it isn't repeated). */
 export const dismissNotification = (id: string) => request<void>(`/api/v1/notifications/${id}`, { method: "DELETE" });

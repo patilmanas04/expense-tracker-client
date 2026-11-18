@@ -137,16 +137,26 @@ export interface MerchantPreview {
   counts: string[];
 }
 
+export interface NotificationAction {
+  label: string;
+  /** Same-origin POST, always under /api/v1/. */
+  path: string;
+}
+
 /** Mirrors `NotificationOut` / `Inbox` in the backend's notifications.py. */
 export interface AppNotification {
   id: string;
   kind: string;
   title: string;
   body: string;
-  /** Dashboard path to open on tap, e.g. "/settings/limits". */
+  /** Dashboard path to open on tap, e.g. "/settings/limits"; null for notifications with buttons: tapping only marks it read. */
   link: string | null;
   created_at: string;
   read: boolean;
+  /** Buttons; empty for most kinds. */
+  actions: NotificationAction[];
+  /** Shown in place of the buttons once decided. */
+  resolved: string | null;
 }
 
 export interface Inbox {

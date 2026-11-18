@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo, useState } from "react";
 
-import { categoryBreakdown, dailySeries, monthlyTrend, spendingPace, topMerchants } from "@/lib/analytics";
+import { categoryBreakdown, dailySeries, monthTotals, monthlyTrend, spendingPace, topMerchants } from "@/lib/analytics";
 import { formatMoney, monthLabel, shortDayLabel } from "@/lib/format";
 import type { TxType } from "@/lib/types";
 
@@ -28,6 +28,7 @@ export function ReportView() {
   const daily = useMemo(() => dailySeries(txns, month, currency, today), [txns, month, currency, today]);
   const trend = useMemo(() => monthlyTrend(txns, month, currency), [txns, month, currency]);
   const merchants = useMemo(() => topMerchants(txns, month, currency, type), [txns, month, currency, type]);
+  const invested = useMemo(() => monthTotals(txns, month, currency).invested, [txns, month, currency]);
   const pace = useMemo(() => (type === "DEBIT" ? spendingPace(txns, month, currency, today) : null), [txns, month, currency, today, type]);
 
   const series = type === "DEBIT" ? "expense" : "income";
@@ -117,6 +118,11 @@ export function ReportView() {
             <Stat label={peak ? `Peak · ${shortDayLabel(peak.day)}` : "Peak day"} value={peak ? formatMoney(peak[series], currency, { decimals: false }) : "—"} />
             <Stat label="Payments" value={String(count)} />
           </dl>
+          {type === "DEBIT" && invested > 0 ? (
+            <p className="mt-3 text-center text-[13px] text-ink-2">
+              Invested: {formatMoney(invested, currency, { decimals: false })} · not in expenses
+            </p>
+          ) : null}
         </Card>
 
         {pace ? (

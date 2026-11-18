@@ -25,6 +25,7 @@ import {
   clearNotifications as apiClearNotifications,
   dismissNotification as apiDismissNotification,
   markNotificationsRead as apiMarkNotificationsRead,
+  runNotificationAction as apiRunNotificationAction,
   saveBalance as apiSaveBalance,
   saveLimits as apiSaveLimits,
   saveMerchantLimit as apiSaveMerchantLimit,
@@ -84,6 +85,8 @@ interface DataContextValue {
   dismissNotification: (id: string) => Promise<void>;
   /** Clear every notification. */
   clearNotifications: () => Promise<void>;
+  /** Runs a notification's button, then refreshes transactions and the inbox. Throws ApiError (its message is shown in the row). */
+  runNotificationAction: (path: string) => Promise<void>;
   /** Adds a transaction by hand; it appears in the lists straight away. */
   addTransaction: (input: NewTransaction) => Promise<Txn>;
   /** Edits a transaction; a new category is remembered for the merchant. */
@@ -501,6 +504,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
     }
   }, [inbox]);
 
+  // If a poll is already in flight this returns at once; the next 5-second poll brings the result.
+  const runNotificationAction = useCallback(
+    async (path: string) => {
+      await apiRunNotificationAction(path);
+      await poll();
+    },
+    [poll],
+  );
+
   // Stable, so an open sheet's effects don't re-run (and move focus) whenever other data changes.
   const openNotifications = useCallback(() => setNotificationsOpenedAt(Date.now()), []);
   const closeNotifications = useCallback(() => setNotificationsOpenedAt(0), []);
@@ -536,6 +548,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       markNotificationsRead,
       dismissNotification,
       clearNotifications,
+      runNotificationAction,
       addTransaction,
       updateTransaction,
       deleteTransaction,
@@ -573,6 +586,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       markNotificationsRead,
       dismissNotification,
       clearNotifications,
+      runNotificationAction,
       addTransaction,
       updateTransaction,
       deleteTransaction,

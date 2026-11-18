@@ -1,4 +1,5 @@
 import {
+  ArrowDownUp,
   ArrowLeftRight,
   Banknote,
   BriefcaseBusiness,
@@ -64,17 +65,28 @@ const META: Record<string, CategoryMeta> = {
   Salary: { color: PALETTE.green, icon: BriefcaseBusiness },
   Income: { color: PALETTE.teal, icon: HandCoins },
   "Refunds & Cashback": { color: PALETTE.blue, icon: Undo2 },
+  "Self Transfer": { color: PALETTE.slate, icon: ArrowDownUp },
   Transfer: { color: PALETTE.slate, icon: ArrowLeftRight },
 };
 
 /** Every category, in the same order as the backend's list. */
 export const CATEGORY_NAMES = Object.keys(META);
 
+/** Card bill payments and transfers between your own accounts: neither spending nor income.
+ * Matches spending.py; tests/test_spending.py compares them. */
+export const NOT_COUNTED: ReadonlySet<string> = new Set(["Credit Card Payment", "Self Transfer"]);
+
+/** Money put into investments and deposits: not spending, shown as "Invested"; money back isn't income.
+ * Matches spending.py; tests/test_spending.py compares them. */
+export const INVESTED: ReadonlySet<string> = new Set(["Investments & Finance"]);
+
 /** The overall spending limit, across every category (`ALL` in the backend's limits.py). */
 export const ALL_SPENDING = "All";
 
-/** Categories that can have a spending limit; money-in categories can't (matches limits.py). */
-export const LIMIT_CATEGORIES = CATEGORY_NAMES.filter((name) => !["Salary", "Income", "Refunds & Cashback"].includes(name));
+/** Categories that can have a spending limit: not money in, and not categories that aren't spending (matches limits.py). */
+export const LIMIT_CATEGORIES = CATEGORY_NAMES.filter(
+  (name) => !["Salary", "Income", "Refunds & Cashback"].includes(name) && !NOT_COUNTED.has(name) && !INVESTED.has(name),
+);
 
 /** Monthly pay. Paid on or after this day of the month, it counts toward the next month's income
  * (it's the money for that month), so it's assigned to whichever month holds most of the month

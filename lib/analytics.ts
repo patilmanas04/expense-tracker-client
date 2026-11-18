@@ -1,4 +1,4 @@
-import { SALARY, SALARY_NEXT_MONTH_FROM, categoryName } from "./categories";
+import { INVESTED, NOT_COUNTED, SALARY, SALARY_NEXT_MONTH_FROM, categoryName } from "./categories";
 import {
   dayKey,
   dayOfMonth,
@@ -84,8 +84,15 @@ export function latestUpdatedAt(txns: Txn[]): string | null {
   return latest;
 }
 
-/** Unparsed SMS stay visible for review but never count towards totals. */
-export const counts = (t: Txn, currency: string) => t.is_parsed && t.currency === currency;
+/** Counts toward Spent (debits) or Income (credits): parsed, in this currency, and not a card bill
+ * payment, a transfer between your own accounts or an investment (NOT_COUNTED / INVESTED in
+ * categories.ts). Unparsed SMS stay visible for review but never count. */
+export const counts = (t: Txn, currency: string) =>
+  t.is_parsed && t.currency === currency && !NOT_COUNTED.has(categoryName(t)) && !INVESTED.has(categoryName(t));
+
+/** Money put into investments and deposits: "Invested", never Spent. */
+export const isInvested = (t: Txn, currency: string) =>
+  t.is_parsed && t.currency === currency && t.type === "DEBIT" && INVESTED.has(categoryName(t));
 
 const sum = (list: Txn[]) => list.reduce((total, t) => total + t.minor, 0);
 
@@ -98,6 +105,7 @@ function comparisonWindow(month: string, today: string) {
 export interface MonthTotals {
   income: number;
   expense: number;
+  invested: number;
   net: number;
   count: number;
   review: number;
@@ -106,6 +114,7 @@ export interface MonthTotals {
 export function monthTotals(txns: Txn[], month: string, currency: string): MonthTotals {
   let income = 0;
   let expense = 0;
+  let invested = 0;
   let count = 0;
   let review = 0;
   for (const t of txns) {
@@ -114,11 +123,16 @@ export function monthTotals(txns: Txn[], month: string, currency: string): Month
       if (!t.is_parsed) review += 1;
     }
     // Money counts toward its month (salary paid late in the previous month counts here).
-    if (t.countsIn !== month || !counts(t, currency)) continue;
+    if (t.countsIn !== month) continue;
+    if (isInvested(t, currency)) {
+      invested += t.minor;
+      continue;
+    }
+    if (!counts(t, currency)) continue;
     if (t.type === "CREDIT") income += t.minor;
     else expense += t.minor;
   }
-  return { income, expense, net: income - expense, count, review };
+  return { income, expense, invested, net: income - expense - invested, count, review };
 }
 
 export interface Comparison {

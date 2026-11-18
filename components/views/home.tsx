@@ -1,6 +1,6 @@
 "use client";
 
-import { BadgeIndianRupee, Bell, ChevronRight, Search, Sparkles, Wallet } from "lucide-react";
+import { BadgeIndianRupee, Bell, ChevronRight, PiggyBank, Search, Sparkles, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useMemo } from "react";
@@ -12,7 +12,7 @@ import {
   monthTotals,
   spendingPace,
 } from "@/lib/analytics";
-import { categoryMeta } from "@/lib/categories";
+import { PALETTE, categoryMeta } from "@/lib/categories";
 import { formatMoney, formatPercent, monthLabel, monthName } from "@/lib/format";
 
 import { Donut } from "../charts/donut";
@@ -113,7 +113,7 @@ export function HomeView() {
                 label="Income"
                 minor={totals.income}
                 currency={currency}
-                info={`Money that came into your accounts in ${monthName(month)}: refunds, cashback, transfers in and other income. Salary paid on the 16th or later counts toward the next month, the one it pays for. SMS Folio couldn't read aren't counted.`}
+                info={`Money that came into your accounts in ${monthName(month)}: refunds, cashback, transfers from other people and other income. Card bill payments, transfers between your own accounts and money back from investments aren't counted. Salary paid on the 16th or later counts toward the next month, the one it pays for. SMS Folio couldn't read aren't counted.`}
               />
               <MoneyCard
                 icon={Wallet}
@@ -121,8 +121,19 @@ export function HomeView() {
                 label="Net flow"
                 minor={totals.net}
                 currency={currency}
-                info={`Income minus expenses for ${monthName(month)}. Positive means more came in than went out; negative means you spent more than you received.`}
+                info={`Income minus spending and investments for ${monthName(month)}. Positive means more came in than went out; negative means more went out than came in.`}
               />
+              {totals.invested > 0 ? (
+                <MoneyCard
+                  className="col-span-2"
+                  icon={PiggyBank}
+                  color={PALETTE.teal}
+                  label="Invested"
+                  minor={totals.invested}
+                  currency={currency}
+                  info={`Money put into investments and deposits in ${monthName(month)}: SIPs, mutual funds, FDs, PPF. It isn't counted in Spent, and money coming back from investments isn't counted as Income.`}
+                />
+              ) : null}
             </div>
 
             {insight ? (
@@ -221,6 +232,7 @@ function MoneyCard({
   minor,
   currency,
   info,
+  className,
 }: {
   icon: typeof Wallet;
   color: string;
@@ -228,10 +240,11 @@ function MoneyCard({
   minor: number;
   currency: string;
   info: string;
+  className?: string;
 }) {
   return (
     // relative: the (i) bubble is placed against the card so it never runs off-screen
-    <Card className="relative p-4 sm:p-5">
+    <Card className={cx("relative p-4 sm:p-5", className)}>
       <IconTile icon={icon} color={color} round size="lg" />
       <p className="mt-6 flex items-center gap-1.5 text-[15px] text-ink-2">
         {label}
