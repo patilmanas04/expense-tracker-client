@@ -1,18 +1,21 @@
 "use client";
 
-import { CalendarDays, Check, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
+import { CalendarDays, Check, Download, Hash, Plus, Search, SearchX, SlidersHorizontal, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { counts, needsReview, tripSummary, type Txn } from "@/lib/analytics";
 import { categoryMeta, categoryName } from "@/lib/categories";
+import { transactionsCsv } from "@/lib/csv";
+import { fileName, type ExportFilters } from "@/lib/csv-format";
 import { dayKey, dayRangeLabel, formatMoney, monthLabel, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
+import { saveFile } from "@/lib/save-file";
 import { allTags, tagQuery } from "@/lib/tags";
 
 import { AddTransactionSheet } from "../add-transaction";
 import { useData, type KindFilter } from "../data-provider";
 import { MoreFiltersSheet } from "../more-filters-sheet";
 import { TransactionGroups } from "../transactions";
-import { Card, SelectPill, cx } from "../ui";
+import { Card, IconButton, SelectPill, cx } from "../ui";
 
 const PAGE = 50;
 const ALL = "ALL";
@@ -41,6 +44,24 @@ function inPeriod(t: Txn, period: string, day: string, range: DayRange, today: s
       return (!range.from || t.day >= range.from) && (!range.to || t.day <= range.to);
     default:
       return t.month === period;
+  }
+}
+
+/** The chosen period for the export's file name. */
+function exportPeriod(period: string, day: string, range: DayRange, today: string, yesterday: string): ExportFilters["period"] {
+  switch (period) {
+    case ALL:
+      return null;
+    case TODAY:
+      return { day: today };
+    case YESTERDAY:
+      return { day: yesterday };
+    case ON_DAY:
+      return day ? { day } : null;
+    case RANGE:
+      return { from: range.from, to: range.to };
+    default:
+      return { month: period };
   }
 }
 
@@ -138,6 +159,7 @@ export function ActivityView() {
   const [appliedNonce, setAppliedNonce] = useState<number | null>(null);
   const [adding, setAdding] = useState(false);
   const [added, setAdded] = useState<Txn | null>(null);
+  const [exporting, setExporting] = useState(false); // while the share sheet is open
   // Stable, so a live update re-rendering this page doesn't reset focus inside the open sheet.
   const closeAdd = useCallback(() => setAdding(false), []);
   const closeMore = useCallback(() => setMoreOpen(false), []);
@@ -280,6 +302,29 @@ export function ActivityView() {
   };
   const amountPill = amountLabel(amount, currency);
 
+  // Saves exactly the listed transactions (all of them, not only the rendered ones) as a CSV file.
+  // Search text and the amount filter aren't part of the file name.
+  const exportCsv = async () => {
+    if (!filtered.length) return;
+    const exportDay = today || dayKey(Date.now()); // in a click handler, not during render
+    const name = fileName(
+      {
+        period: exportPeriod(period, day, range, exportDay, yesterday),
+        category: category === ALL ? null : category,
+        tags: [...new Set([tag, searchTag].filter((t): t is string => !!t))],
+        kind,
+      },
+      exportDay,
+    );
+    const text = transactionsCsv(filtered); // built before any await, so the share keeps the tap's permission
+    setExporting(true);
+    try {
+      await saveFile(text, name, "text/csv");
+    } finally {
+      setExporting(false);
+    }
+  };
+
   const chips: { value: KindFilter; label: string }[] = [
     { value: "ALL", label: "All" },
     { value: "DEBIT", label: "Expenses" },
@@ -290,11 +335,19 @@ export function ActivityView() {
   return (
     <div className="mx-auto max-w-3xl px-4 pt-safe sm:px-6 lg:px-8 lg:pt-8">
       <header className="flex items-center justify-between gap-3 pt-2">
-        <h1 className="text-[22px] font-semibold tracking-tight text-ink lg:text-3xl">Activity</h1>
-        <div className="flex items-center gap-3">
-          <p className="text-sm text-ink-2">
+        <h1 className="shrink-0 text-[22px] font-semibold tracking-tight text-ink lg:text-3xl">Activity</h1>
+        <div className="flex min-w-0 items-center gap-2">
+          <p className="min-w-0 truncate text-sm text-ink-2">
             {filtered.length} of {txns.length}
           </p>
+          <IconButton
+            label="Export CSV"
+            onClick={exportCsv}
+            disabled={filtered.length === 0 || exporting}
+            className="disabled:pointer-events-none disabled:opacity-40"
+          >
+            <Download size={18} aria-hidden />
+          </IconButton>
           <button
             type="button"
             onClick={() => setAdding(true)}

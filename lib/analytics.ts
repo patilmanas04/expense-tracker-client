@@ -111,6 +111,17 @@ export const counts = (t: Txn, currency: string) =>
 export const isInvested = (t: Txn, currency: string) =>
   t.is_parsed && !isHeldOut(t) && t.currency === currency && t.type === "DEBIT" && INVESTED.has(categoryName(t));
 
+export type CountsAs = "Spending" | "Income" | "Invested" | "Not counted" | "Needs review" | "Possible duplicate";
+
+/** The CSV's "Counts as" column: how the app's totals treat this row, in the row's own currency. */
+export function countsAs(t: Txn): CountsAs {
+  if (!t.is_parsed) return "Needs review";
+  if (isHeldOut(t)) return "Possible duplicate";
+  if (isInvested(t, t.currency)) return "Invested";
+  if (counts(t, t.currency)) return t.type === "DEBIT" ? "Spending" : "Income";
+  return "Not counted";
+}
+
 export interface TripSummary {
   /** First and last day in the list ("YYYY-MM-DD"). */
   from: string;

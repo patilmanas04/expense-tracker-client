@@ -105,6 +105,15 @@ const timeFormat = new Intl.DateTimeFormat("en-IN", {
 });
 export const timeLabel = (iso: string) => timeFormat.format(new Date(iso));
 
+const time24Format = new Intl.DateTimeFormat("en-GB", {
+  timeZone: TIME_ZONE,
+  hour: "2-digit",
+  minute: "2-digit",
+  hourCycle: "h23",
+});
+/** "00:05", "13:35" (IST, 24-hour); for the CSV export. */
+export const timeLabel24 = (iso: string) => time24Format.format(new Date(iso));
+
 const fullDateTime = new Intl.DateTimeFormat("en-IN", {
   timeZone: TIME_ZONE,
   weekday: "short",
