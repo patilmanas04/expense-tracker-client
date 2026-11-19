@@ -39,13 +39,13 @@ interface Row {
 
 const ACTIONS: Record<"DEBIT" | "CREDIT", { action: Action; label: string }[]> = {
   DEBIT: [
-    { action: "split", label: "Split with people" },
-    { action: "lent", label: "Lent to …" },
-    { action: "repaid_by_me", label: "Repaid to …" },
+    { action: "split", label: "Split bill" },
+    { action: "lent", label: "Lent money" },
+    { action: "repaid_by_me", label: "Paid back" },
   ],
   CREDIT: [
-    { action: "repaid_to_me", label: "Repayment from …" },
-    { action: "borrowed", label: "Borrowed from …" },
+    { action: "repaid_to_me", label: "Got repaid" },
+    { action: "borrowed", label: "Borrowed money" },
   ],
 };
 
@@ -60,7 +60,10 @@ const KIND_WORDS: Record<LedgerKind, string> = {
 const CAPSULE =
   "h-9 rounded-full px-4 text-[15px] font-semibold transition active:scale-95 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-60";
 const DASHED =
-  "flex h-10 max-w-full items-center gap-1.5 rounded-full border border-dashed border-line bg-surface/60 px-3.5 text-sm font-medium text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50";
+  "flex h-10 min-w-0 max-w-full items-center gap-1.5 rounded-full border border-dashed border-line bg-surface/60 px-3.5 text-sm font-medium text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50";
+/** The action row's buttons: DASHED with tighter padding so three two-word labels fit a phone row. */
+const ACTION =
+  "flex h-10 min-w-0 max-w-full items-center rounded-full border border-dashed border-line bg-surface/60 px-3 text-sm font-medium whitespace-nowrap text-violet transition hover:border-violet/40 focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50";
 const INPUT =
   "h-11 w-full min-w-0 rounded-2xl border border-line bg-canvas px-3 text-[16px] text-ink outline-none placeholder:text-ink-3 focus:border-violet/50 focus:ring-4 focus:ring-violet/15 disabled:opacity-60";
 
@@ -88,8 +91,8 @@ const toInput = (e: LedgerEntry): LedgerEntryInput => ({
 
 /**
  * The transaction sheet's Lend & borrow section (parsed INR rows): the entries linked to this payment, each
- * removable, and the actions that add them. Debit: Split with people, Lent to, Repaid to; credit: Repayment
- * from, Borrowed from. They open an inline editor; Save replaces the payment's entries on the server.
+ * removable, and the actions that add them. Debit: Split bill, Lent money, Paid back; credit: Got repaid,
+ * Borrowed money. They open an inline editor; Save replaces the payment's entries on the server.
  */
 export function LendBorrowCard({ t }: { t: Txn }) {
   const { saveLinkedEntries } = useData();
@@ -433,10 +436,26 @@ export function LendBorrowCard({ t }: { t: Txn }) {
               );
             })}
           </ul>
-          <p className="mt-1 text-[14px] text-ink-2">
-            {debit ? "Your share" : "Counts as income"}{" "}
-            <span className="font-semibold text-ink tabular-nums">{ledgerMoney(t.counted)}</span>
-          </p>
+          <div className="mt-1 flex min-w-0 items-center justify-between gap-2">
+            <p className="min-w-0 truncate text-[14px] text-ink-2">
+              {debit ? "Your share" : "Counts as income"}{" "}
+              <span className="font-semibold text-ink tabular-nums">{ledgerMoney(t.counted)}</span>
+            </p>
+            {/* Edit sits here, not in the action row, so the actions keep room for their full labels. */}
+            {held ? null : (
+              <button
+                ref={(el) => {
+                  buttons.current.edit = el;
+                }}
+                type="button"
+                onClick={() => open("edit")}
+                disabled={!ready || saving}
+                className="-mr-2 h-9 shrink-0 rounded-full px-3 text-sm font-medium text-violet transition hover:bg-track focus-visible:outline-2 focus-visible:outline-violet disabled:opacity-50"
+              >
+                Edit
+              </button>
+            )}
+          </div>
         </>
       ) : null}
       {loaded?.failed ? (
@@ -448,7 +467,8 @@ export function LendBorrowCard({ t }: { t: Txn }) {
         </p>
       ) : null}
       {held ? null : (
-        <div className="mt-3 flex flex-wrap gap-2">
+        <div className="mt-3 flex gap-1.5">
+          {/* One row: labels are at most two words; a button only shrinks to "…" when the row is too narrow. */}
           {ACTIONS[t.type].map(({ action, label }) => (
             <button
               key={action}
@@ -458,24 +478,11 @@ export function LendBorrowCard({ t }: { t: Txn }) {
               type="button"
               onClick={() => open(action)}
               disabled={!ready || saving}
-              className={DASHED}
+              className={ACTION}
             >
               <span className="truncate">{label}</span>
             </button>
           ))}
-          {list.length ? (
-            <button
-              ref={(el) => {
-                buttons.current.edit = el;
-              }}
-              type="button"
-              onClick={() => open("edit")}
-              disabled={!ready || saving}
-              className={DASHED}
-            >
-              Edit
-            </button>
-          ) : null}
         </div>
       )}
       {errorLine}
