@@ -19,10 +19,12 @@ import {
   timeLabel,
   toMinor,
 } from "@/lib/format";
+import { ledgerMoney } from "@/lib/ledger";
 import { allTags, insertTag, partialTagAt, suggestTags } from "@/lib/tags";
 import type { RefundWatch, TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
+import { LendBorrowCard } from "./lend-borrow-card";
 import { lockPageScroll, useSheetDrag } from "./sheet-drag";
 import { FIELD, Field, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 import { TagChips, transactionTitle } from "./transactions";
@@ -353,6 +355,8 @@ function SheetBody({ t }: { t: Txn }) {
             {/* A held-out duplicate is decided first; a watch already set still shows. */}
             {t.is_parsed && debit && (t.refund || !isHeldOut(t)) ? <RefundCard t={t} /> : null}
             {t.is_parsed && !debit && t.refund_for ? <RefundForLine t={t} /> : null}
+            {/* Splits, loans and repayments: parsed rupee payments only. */}
+            {t.is_parsed && t.currency === "INR" ? <LendBorrowCard t={t} /> : null}
 
             <dl className="divide-y divide-line rounded-card border border-line/70 bg-surface px-4 shadow-card">
               <Row label="Type">{debit ? "Money out" : "Money in"}</Row>
@@ -373,6 +377,11 @@ function SheetBody({ t }: { t: Txn }) {
                 {categoryName(t)}
               </Row>
               {carriedForward(t) ? <Row label="Counts toward">{monthLabel(t.countsIn)}</Row> : null}
+              {t.is_parsed && t.linked_amount > 0 ? (
+                <Row label="Counts">
+                  {ledgerMoney(t.counted)} of {ledgerMoney(t.minor)}
+                </Row>
+              ) : null}
               {t.account_ref ? <Row label="Account">{t.account_ref}</Row> : null}
               {t.balance !== null ? (
                 // The SMS's "Avl Bal": one account's balance, or a card's limit left (never Balance left).

@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, CornerDownRight, CreditCard, NotebookPen, TriangleAlert } from "lucide-react";
+import { Banknote, CornerDownRight, CreditCard, NotebookPen, TriangleAlert, Users } from "lucide-react";
 import { useRouter } from "next/navigation";
 
 import { carriedForward, groupByDay, isHeldOut, type Txn } from "@/lib/analytics";
@@ -127,6 +127,16 @@ export function TransactionRow({ t }: { t: Txn }) {
               <NotebookPen size={13} className="shrink-0 text-ink-3" aria-hidden />
               <span className="sr-only">Note: </span>
               <span className="truncate">{t.notes}</span>
+            </span>
+          ) : null}
+          {t.is_parsed && !held && t.linked_amount > 0 ? (
+            // Split with people, or a loan or repayment: only part of it counts in the totals.
+            <span className="mt-1 flex min-w-0 items-center gap-1.5 text-[13px] text-ink-2">
+              <Users size={13} className="shrink-0 text-ink-3" aria-hidden />
+              <span className="truncate">
+                Counts {formatMoney(t.counted, t.currency, { decimals: t.counted % 100 !== 0 })} of{" "}
+                {formatMoney(t.minor, t.currency, { decimals: t.minor % 100 !== 0 })}
+              </span>
             </span>
           ) : null}
         </span>

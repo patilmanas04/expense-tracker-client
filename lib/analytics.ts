@@ -24,6 +24,8 @@ export { monthCalendar, type MonthCalendar };
 /** A transaction with precomputed IST day/month and an integer amount in paise. */
 export interface Txn extends Transaction {
   minor: number;
+  /** Paise that count in totals: the amount minus its lend & borrow entries (`linked_amount`). */
+  counted: number;
   day: string;
   month: string;
   /**
@@ -70,7 +72,9 @@ export function prepare(list: Transaction[]): Txn[] {
       balance_kind: t.balance_kind ?? null, // an older backend doesn't send it
       refund: t.refund ?? null, // an older backend doesn't send them
       refund_for: t.refund_for ?? null,
+      linked_amount: t.linked_amount ?? 0, // an older backend doesn't send it
       minor: toMinor(t.amount),
+      counted: toMinor(t.amount) - toMinor(t.linked_amount ?? 0),
       day,
       month: monthOf(day),
       period: monthOf(day),
@@ -190,19 +194,19 @@ export function tripSummary(list: Txn[], currency: string): TripSummary | null {
   for (const t of list) {
     if (t.day < from) from = t.day;
     if (t.day > to) to = t.day;
-    // Doc 15 switches the sums to `t.counted`.
     if (t.type !== "DEBIT" || !counts(t, currency)) continue;
     const name = categoryName(t);
-    byCategory.set(name, (byCategory.get(name) ?? 0) + t.minor);
+    byCategory.set(name, (byCategory.get(name) ?? 0) + t.counted);
   }
   const top = [...byCategory]
     .map(([name, minor]) => ({ name, minor }))
+    .filter((c) => c.minor !== 0)
     .sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name))
     .slice(0, 3);
   return { from, to, days: daySpan(from, to), top };
 }
 
-const sum = (list: Txn[]) => list.reduce((total, t) => total + t.minor, 0);
+const sum = (list: Txn[]) => list.reduce((total, t) => total + t.counted, 0);
 
 /**
  * Month to compare against: the same days of the previous month (or pay period) while a month is in progress.
@@ -236,12 +240,12 @@ export function monthTotals(txns: Txn[], month: string, currency: string): Month
     // Money counts toward its month (salary paid late in the previous month counts here).
     if (t.countsIn !== month) continue;
     if (isInvested(t, currency)) {
-      invested += t.minor;
+      invested += t.counted;
       continue;
     }
     if (!counts(t, currency)) continue;
-    if (t.type === "CREDIT") income += t.minor;
-    else expense += t.minor;
+    if (t.type === "CREDIT") income += t.counted;
+    else expense += t.counted;
   }
   return { income, expense, invested, net: income - expense - invested, count, review };
 }
@@ -305,15 +309,16 @@ export function categoryBreakdown(
     const name = categoryName(t);
     if (t.countsIn === month) {
       const entry = current.get(name) ?? { minor: 0, count: 0 };
-      entry.minor += t.minor;
+      entry.minor += t.counted;
       entry.count += 1;
       current.set(name, entry);
     } else if (t.countsIn === previous && t.countsDay <= cutoff) {
-      prev.set(name, (prev.get(name) ?? 0) + t.minor);
+      prev.set(name, (prev.get(name) ?? 0) + t.counted);
     }
   }
   const total = [...current.values()].reduce((s, e) => s + e.minor, 0);
   return [...current.entries()]
+    .filter(([, { minor }]) => minor !== 0) // fully split with people: nothing of it counts
     .map(([name, { minor, count }]) => {
       const before = prev.get(name) ?? 0;
       return {
@@ -346,8 +351,8 @@ export function dailySeries(txns: Txn[], month: string, currency: string, today:
     if (t.countsIn !== month || !counts(t, currency)) continue;
     const point = points[t.countsDay - 1]; // carried-forward salary lands on the 1st
     if (!point) continue;
-    if (t.type === "CREDIT") point.income += t.minor;
-    else point.expense += t.minor;
+    if (t.type === "CREDIT") point.income += t.counted;
+    else point.expense += t.counted;
   }
   return points;
 }
@@ -368,16 +373,16 @@ export function monthlyTrend(txns: Txn[], endMonth: string, currency: string, mo
   for (const t of txns) {
     const point = index.get(t.countsIn);
     if (!point || !counts(t, currency)) continue;
-    if (t.type === "CREDIT") point.income += t.minor;
-    else point.expense += t.minor;
+    if (t.type === "CREDIT") point.income += t.counted;
+    else point.expense += t.counted;
   }
   return points;
 }
 
 /**
  * Trend stats for one category's or merchant's rows: `points` from monthlyTrend(rows, endMonth, currency, n).
- * Sums counted DEBITs by countsIn with countsDay <= today's day within its month, `cal.dayIndex(today)` (doc 15
- * switches the sums to t.counted). With pay periods on, countsIn/countsDay are already the periods' (applyPeriods).
+ * Sums counted DEBITs (`t.counted`) by countsIn with countsDay <= today's day within its month, `cal.dayIndex(today)`.
+ * With pay periods on, countsIn/countsDay are already the periods' (applyPeriods).
  */
 export function trendStats(
   points: MonthPoint[],
@@ -391,7 +396,7 @@ export function trendStats(
   const upToDay: Record<string, number> = {};
   for (const t of rows) {
     if (t.type !== "DEBIT" || !months.has(t.countsIn) || t.countsDay > day || !counts(t, currency)) continue;
-    upToDay[t.countsIn] = (upToDay[t.countsIn] ?? 0) + t.minor;
+    upToDay[t.countsIn] = (upToDay[t.countsIn] ?? 0) + t.counted;
   }
   return summarizeTrend(points, cal.current, upToDay);
 }
@@ -411,10 +416,13 @@ export function trendMerchants(rows: Txn[], from: string, to: string, currency: 
     if (!name) continue;
     const key = name.toLowerCase();
     const entry = byKey.get(key) ?? { key, name, minor: 0 }; // rows are newest first: the newest name labels it
-    entry.minor += t.minor;
+    entry.minor += t.counted;
     byKey.set(key, entry);
   }
-  return [...byKey.values()].sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name)).slice(0, limit);
+  return [...byKey.values()]
+    .filter((m) => m.minor !== 0)
+    .sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name))
+    .slice(0, limit);
 }
 
 export interface TrendCategory {
@@ -428,10 +436,11 @@ export function trendCategories(txns: Txn[], from: string, to: string, currency:
   for (const t of txns) {
     if (t.type !== "DEBIT" || t.countsIn < from || t.countsIn > to || !counts(t, currency)) continue;
     const name = categoryName(t);
-    byName.set(name, (byName.get(name) ?? 0) + t.minor);
+    byName.set(name, (byName.get(name) ?? 0) + t.counted);
   }
   return [...byName]
     .map(([name, minor]) => ({ name, minor }))
+    .filter((c) => c.minor !== 0)
     .sort((a, b) => b.minor - a.minor || a.name.localeCompare(b.name));
 }
 
@@ -448,11 +457,14 @@ export function topMerchants(txns: Txn[], month: string, currency: string, type:
     if (t.countsIn !== month || t.type !== type || !counts(t, currency) || !t.merchant) continue;
     const key = t.merchant.trim().toLowerCase();
     const entry = byKey.get(key) ?? { name: t.merchant.trim(), minor: 0, count: 0, category: categoryName(t) };
-    entry.minor += t.minor;
+    entry.minor += t.counted;
     entry.count += 1;
     byKey.set(key, entry);
   }
-  return [...byKey.values()].sort((a, b) => b.minor - a.minor).slice(0, limit);
+  return [...byKey.values()]
+    .filter((m) => m.minor !== 0)
+    .sort((a, b) => b.minor - a.minor)
+    .slice(0, limit);
 }
 
 /** Habits: a payment under this counts as a small spend (under ₹500). */
@@ -469,8 +481,8 @@ export interface FrequentSpend {
 
 /**
  * Merchants paid at least FREQUENT_MIN_COUNT times this month in counted INR debits under
- * SMALL_SPEND_MINOR each, grouped by Top merchants' key; most payments first. Totals sum `t.minor`
- * (switch to `t.counted` once doc 15 ships). `txns` are newest first, so the newest name labels a group.
+ * SMALL_SPEND_MINOR each (the full amount), grouped by Top merchants' key; most payments first. Totals sum
+ * `t.counted`. `txns` are newest first, so the newest name labels a group.
  */
 export function frequentSmallSpends(txns: Txn[], month: string, limit = 5): FrequentSpend[] {
   const byKey = new Map<string, FrequentSpend>();
@@ -480,7 +492,7 @@ export function frequentSmallSpends(txns: Txn[], month: string, limit = 5): Freq
     const key = t.merchant!.trim().toLowerCase();
     const entry = byKey.get(key) ?? { name: t.merchant!.trim(), category: categoryName(t), count: 0, minor: 0 };
     entry.count += 1;
-    entry.minor += t.minor;
+    entry.minor += t.counted;
     byKey.set(key, entry);
   }
   return [...byKey.values()]
@@ -580,8 +592,8 @@ export function groupByDay(list: Txn[], currency: string): DayGroup[] {
     }
     group.items.push(t);
     if (counts(t, currency)) {
-      if (t.type === "DEBIT") group.spent += t.minor;
-      else group.received += t.minor;
+      if (t.type === "DEBIT") group.spent += t.counted;
+      else group.received += t.counted;
     }
   }
   return groups;

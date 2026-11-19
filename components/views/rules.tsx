@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation";
 import { useCallback, useEffect, useRef, useState, type FormEvent, type ReactNode } from "react";
 
 import { createRule, deleteMerchantName, deleteRule, getMerchantNames, getRules, previewRule, updateRule } from "@/lib/api";
-import { CATEGORY_NAMES, PALETTE, categoryName } from "@/lib/categories";
+import { PALETTE, categoryName, categoryNames } from "@/lib/categories";
 import { dayKey, formatMoney, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
 import { cameFromApp } from "@/lib/nav-history";
 import type { CategoryRule, CategoryRuleInput, MerchantName, RulePreview, RuleSaved } from "@/lib/types";
@@ -333,7 +333,7 @@ function readRule(form: { merchantWords: string; smsWords: string; money: Money;
     category: form.category,
   };
   if (!input.merchant_words && !input.sms_words && !input.min_amount) return { error: NO_CONDITION };
-  if (!CATEGORY_NAMES.includes(input.category)) return { error: NO_CATEGORY };
+  if (!categoryNames().includes(input.category)) return { error: NO_CATEGORY };
   return { input };
 }
 
@@ -572,7 +572,7 @@ function RuleSheet({
                       Pick a category
                     </option>
                   )}
-                  {CATEGORY_NAMES.map((name) => (
+                  {categoryNames().map((name) => (
                     <option key={name} value={name}>
                       {name}
                     </option>

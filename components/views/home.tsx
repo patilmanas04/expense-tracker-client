@@ -22,6 +22,7 @@ import { useSheetCorners } from "../home-sheet-corners";
 import { PaceCard, toSegments } from "../insight-cards";
 import { TransactionGroups } from "../transactions";
 import { Amount, Avatar, Card, IconButton, IconTile, InfoTip, SectionHeader, SelectPill, cx } from "../ui";
+import { GoalsCard } from "../goals-card";
 import { UpcomingCard } from "./upcoming";
 
 const RECENT_LIMIT = 8;
@@ -167,6 +168,8 @@ export function HomeView() {
             ) : null}
 
             <UpcomingCard />
+
+            <GoalsCard className="mt-8" />
 
             <section className="mt-8" aria-labelledby="recent-heading">
               <div className="mb-4 flex items-center justify-between gap-2">

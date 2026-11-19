@@ -1,25 +1,39 @@
 import {
   ArrowDownUp,
   ArrowLeftRight,
+  Baby,
   Banknote,
+  BookOpen,
   BriefcaseBusiness,
   CarFront,
   ChartLine,
   CircleHelp,
   Clapperboard,
+  Coffee,
   CreditCard,
+  Dumbbell,
+  Gift,
   GraduationCap,
   HandCoins,
   HeartPulse,
+  House,
   Landmark,
+  PawPrint,
+  Plane,
+  Shirt,
   ShieldCheck,
   ShoppingBag,
   ShoppingBasket,
+  Sparkles,
+  Tag,
   Undo2,
   Utensils,
+  Wrench,
   Zap,
   type LucideIcon,
 } from "lucide-react";
+
+import type { CustomCategory } from "./types";
 
 /**
  * Categorical hues from the reference, re-stepped so every pair stays apart for
@@ -38,6 +52,24 @@ export const PALETTE = {
   slate: "#64748B",
   gray: "#A1A1AA",
 } as const;
+
+export type PaletteKey = keyof typeof PALETTE;
+
+/** Icons a category of your own can have (the server checks the same 12 names). */
+export const CUSTOM_ICONS: Record<string, LucideIcon> = {
+  PawPrint,
+  Dumbbell,
+  Gift,
+  Baby,
+  House,
+  Plane,
+  Coffee,
+  Shirt,
+  Wrench,
+  BookOpen,
+  Tag,
+  Sparkles,
+};
 
 export const UNCATEGORIZED = "Uncategorized";
 export const OTHER = "Other";
@@ -102,9 +134,44 @@ export const MANUAL = "manual";
 
 const FALLBACK: CategoryMeta = { color: PALETTE.gray, icon: CircleHelp };
 
+/** Most categories of your own (server: "You can have up to 30 categories."). */
+export const CUSTOM_MAX = 30;
+/** Longest name of your own, in characters. */
+export const CUSTOM_NAME_MAX = 40;
+
+/** Names a category of your own can't have, in any case: the built-ins, Uncategorized, "All" and "Other". */
+export const RESERVED_NAMES: ReadonlySet<string> = new Set(
+  [...CATEGORY_NAMES, UNCATEGORIZED, ALL_SPENDING, OTHER].map((name) => name.toLowerCase()),
+);
+
+// Categories of your own, as last loaded; the data provider registers them before rendering with them.
+let custom: CustomCategory[] = [];
+let customMeta = new Map<string, CategoryMeta>();
+
+/** Replaces the categories of your own every lookup below knows about. */
+export function registerCustomCategories(list: CustomCategory[]) {
+  custom = [...list];
+  customMeta = new Map(
+    list.map((c) => [
+      c.name,
+      { icon: CUSTOM_ICONS[c.icon] ?? Tag, color: (PALETTE as Record<string, string>)[c.colour] ?? PALETTE.gray },
+    ]),
+  );
+}
+
+/** Categories of your own, oldest first. */
+export const customCategories = (): readonly CustomCategory[] => custom;
+
 export const categoryName = (t: { category: string | null }) => t.category || UNCATEGORIZED;
 
-export const categoryMeta = (name: string): CategoryMeta => META[name] ?? FALLBACK;
+/** Built-in look, then a category of your own (its icon and colour), then the grey "?". */
+export const categoryMeta = (name: string): CategoryMeta => META[name] ?? customMeta.get(name) ?? FALLBACK;
+
+/** Every category to pick from: the built-ins in the backend's order, then yours. */
+export const categoryNames = (): string[] => [...CATEGORY_NAMES, ...custom.map((c) => c.name)];
+
+/** Categories that can have a spending limit: the built-in spending ones, then yours (all spending categories). */
+export const limitCategories = (): string[] => [...LIMIT_CATEGORIES, ...custom.map((c) => c.name)];
 
 /** `#8458F5` + alpha -> `#8458F51F` for soft icon tiles and progress tracks. */
 export const tint = (hex: string, alpha = 0.12) =>

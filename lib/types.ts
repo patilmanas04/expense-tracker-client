@@ -29,6 +29,8 @@ export interface Transaction {
   refund: "expected" | "refunded" | null;
   /** On a credit you confirmed as a refund: the payment it refunded. */
   refund_for: string | null;
+  /** Lend & borrow entries linked to it (shares, loans, repayments); 0 when none. It then counts `amount − linked_amount`. */
+  linked_amount: number;
 }
 
 /** Mirrors `ManualTransactionInput` in the backend's main.py. */
@@ -96,7 +98,12 @@ export interface BalanceBreakdown {
 
 /** Mirrors `LimitsSummary` in the backend's limits.py. */
 export interface PeriodLimit {
+  /** With rollover carrying into this month: the rollover limit (can be 0). */
   limit: number | null;
+  /** Set only on a monthly status where rollover carries: the limit as you set it. */
+  base?: number | null;
+  /** Set with `base`: limit − base (positive: unspent last month; negative: overspent). */
+  carried?: number | null;
   spent: number;
   /** "YYYY-MM-DD", first and last day (IST). */
   start: string;
@@ -108,6 +115,8 @@ export interface PeriodLimit {
 /** A category with a spending limit of its own. */
 export interface CategoryLimitStatus {
   category: string;
+  /** "Roll over unused amount" is on for its monthly limit. */
+  rollover?: boolean;
   weekly: PeriodLimit;
   monthly: PeriodLimit;
 }
@@ -128,6 +137,8 @@ export interface LimitsSummary {
   /** Overall ("All spending"). */
   weekly: PeriodLimit;
   monthly: PeriodLimit;
+  /** "Roll over unused amount" is on for the overall monthly limit. */
+  rollover?: boolean;
   /** Only categories that have a limit, in category order. */
   categories: CategoryLimitStatus[];
   /** Merchant limits, oldest first. */
@@ -425,4 +436,104 @@ export interface RefundWatchInput {
   amount: string;
   /** "YYYY-MM-DD", 1 to 60 days from today (IST). */
   due_date: string;
+}
+
+/** "lent" and "repaid_by_me" go out (a debit or cash), "borrowed" and "repaid_to_me" come in (a credit or cash). */
+export type LedgerKind = "lent" | "repaid_by_me" | "borrowed" | "repaid_to_me";
+
+/** Mirrors `EntryOut` in the backend's ledger.py. */
+export interface LedgerEntry {
+  id: string;
+  /** As typed: "Rahul". */
+  person: string;
+  kind: LedgerKind;
+  amount: number;
+  /** "YYYY-MM-DD" (IST): the cash entry's day, or the linked transaction's date. */
+  day: string;
+  /** The payment it's linked to; null for a cash entry. */
+  transaction_id: string | null;
+  /** The linked payment's merchant. */
+  merchant: string | null;
+  note: string | null;
+}
+
+/** One person in `GET /api/v1/ledger`. */
+export interface LedgerPerson {
+  /** The spelling of their newest entry. */
+  person: string;
+  /** Trimmed, spaces collapsed, lower case: who's the same person. */
+  key: string;
+  /** Positive: they owe you; negative: you owe them. */
+  balance: number;
+  /** Newest first. */
+  entries: LedgerEntry[];
+}
+
+/** `GET /api/v1/ledger`: open balances by size, then settled people by their newest entry. */
+export interface Ledger {
+  people: LedgerPerson[];
+}
+
+/** One entry of `PUT /api/v1/transactions/{id}/ledger`. */
+export interface LedgerEntryInput {
+  person: string;
+  kind: LedgerKind;
+  /** Plain decimal string, e.g. "600" or "333.33". */
+  amount: string;
+  note?: string | null;
+}
+
+/** Body of `POST /api/v1/ledger`: an entry without a payment. */
+export interface CashEntryInput extends LedgerEntryInput {
+  /** "YYYY-MM-DD", today or earlier (IST). */
+  day: string;
+}
+
+/** Reply of `PUT /api/v1/transactions/{id}/ledger`: the payment's new linked amount and its entries, oldest first. */
+export interface LinkedEntries {
+  linked_amount: number;
+  updated_at: string;
+  entries: LedgerEntry[];
+}
+
+/** Mirrors `GoalOut` in the backend's goals.py. Progress is worked out in the app (lib/goals.ts). */
+export interface Goal {
+  id: string;
+  name: string;
+  target: number;
+  /** "YYYY-MM", or null for no target month. */
+  target_month: string | null;
+  /** Normalised, without "#": payments whose note has this tag count toward it. */
+  tag: string;
+  /** Money added by hand (Add money / Take out); never below 0. */
+  manual_saved: number;
+  archived: boolean;
+  created_at: string;
+}
+
+/** Body of `POST /api/v1/goals` and `PUT /api/v1/goals/{id}` (PUT replaces every field). Amounts are decimal strings. */
+export interface GoalInput {
+  name: string;
+  target: string;
+  target_month: string | null;
+  /** With or without "#"; the server normalises it. */
+  tag: string;
+  manual_saved: string;
+  archived: boolean;
+}
+
+/** Mirrors `CustomCategoryOut` in the backend's categories.py: a spending category of your own. */
+export interface CustomCategory {
+  id: string;
+  name: string;
+  /** A key of CUSTOM_ICONS in lib/categories.ts, e.g. "PawPrint". */
+  icon: string;
+  /** A key of PALETTE in lib/categories.ts, e.g. "orange". */
+  colour: string;
+}
+
+/** `GET /api/v1/categories`: the built-in names (Uncategorized included) and yours, oldest first. */
+export interface Categories {
+  built_in: string[];
+  custom: CustomCategory[];
 }

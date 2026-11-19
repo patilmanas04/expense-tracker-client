@@ -3,7 +3,7 @@
 import { ChevronDown } from "lucide-react";
 import type { ReactNode, Ref } from "react";
 
-import { CATEGORY_NAMES, UNCATEGORIZED } from "@/lib/categories";
+import { UNCATEGORIZED, categoryNames } from "@/lib/categories";
 import { parseAmountInput } from "@/lib/format";
 import type { TxType } from "@/lib/types";
 
@@ -125,11 +125,15 @@ export function TransactionFields({
             className={`${FIELD} appearance-none truncate pr-9`}
           >
             {autoCategory ? <option value={AUTO}>Auto (from the name)</option> : null}
-            {CATEGORY_NAMES.map((name) => (
+            {categoryNames().map((name) => (
               <option key={name} value={name}>
                 {name}
               </option>
             ))}
+            {/* A category the list doesn't have (yours, before they've loaded) stays as it is. */}
+            {draft.category && draft.category !== UNCATEGORIZED && !categoryNames().includes(draft.category) ? (
+              <option value={draft.category}>{draft.category}</option>
+            ) : null}
             {autoCategory ? null : <option value={UNCATEGORIZED}>{UNCATEGORIZED}</option>}
           </select>
           <ChevronDown size={16} className="pointer-events-none absolute top-1/2 right-3.5 -translate-y-1/2 text-ink-2" aria-hidden />

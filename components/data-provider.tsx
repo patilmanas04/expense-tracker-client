@@ -16,14 +16,21 @@ import {
 } from "@/lib/analytics";
 import {
   ApiError,
+  addCategory as apiAddCategory,
   addTransaction as apiAddTransaction,
   cancelRefund as apiCancelRefund,
   clearBalance as apiClearBalance,
   clearRecurringDecision as apiClearRecurringDecision,
+  createGoal as apiCreateGoal,
+  deleteCategory as apiDeleteCategory,
+  deleteGoal as apiDeleteGoal,
+  deleteLedgerEntry as apiDeleteLedgerEntry,
   deleteTransaction as apiDeleteTransaction,
   dismissUpcoming as apiDismissUpcoming,
   getAllTransactions,
   getBalance,
+  getCategories,
+  getGoals,
   getLimits,
   getMe,
   getNotifications,
@@ -39,20 +46,31 @@ import {
   markNotificationsRead as apiMarkNotificationsRead,
   runNotificationAction as apiRunNotificationAction,
   saveBalance as apiSaveBalance,
+  saveLinkedEntries as apiSaveLinkedEntries,
   saveLimits as apiSaveLimits,
+  setRollover as apiSetRollover,
   saveMerchantLimit as apiSaveMerchantLimit,
   saveSettings as apiSaveSettings,
   setRecurringDecision as apiSetRecurringDecision,
   signOut as apiSignOut,
+  updateCategory as apiUpdateCategory,
+  updateGoal as apiUpdateGoal,
   updateTransaction as apiUpdateTransaction,
 } from "@/lib/api";
+import { customCategories as registeredCategories, registerCustomCategories } from "@/lib/categories";
 import { dayKey } from "@/lib/format";
+import { sortGoals } from "@/lib/goals";
 import type {
   Balance,
   Cadence,
+  CustomCategory,
+  Goal,
+  GoalInput,
   Inbox,
+  LedgerEntryInput,
   LimitsInput,
   LimitsSummary,
+  LinkedEntries,
   MerchantLimitInput,
   NewTransaction,
   PayPeriods,
@@ -111,6 +129,8 @@ interface DataContextValue {
   /** Weekly/monthly spend limits, overall, per category and per merchant, with what's been spent; null until loaded. */
   limits: LimitsSummary | null;
   saveLimits: (limits: LimitsInput) => Promise<LimitsSummary>;
+  /** "Roll over unused amount" on the overall (null) or a category's monthly limit. Throws ApiError. */
+  saveRollover: (category: string | null, enabled: boolean) => Promise<LimitsSummary>;
   /** Adds, changes or removes one merchant's limit. */
   saveMerchantLimit: (body: MerchantLimitInput) => Promise<LimitsSummary>;
   /** Recurring series (Report's card and /report/recurring); null until loaded. */
@@ -136,6 +156,30 @@ interface DataContextValue {
    * ApiError when the dismiss fails (`upcoming` untouched); resolves false when it saved but the reload failed.
    */
   dismissUpcoming: (id: string) => Promise<boolean>;
+  /** Categories of your own, oldest first (also registered in lib/categories for pickers and icons). */
+  customCategories: CustomCategory[];
+  /** Adds a category of your own. Throws ApiError (409 name taken or 30 already, 422). */
+  addCategory: (input: Omit<CustomCategory, "id">) => Promise<CustomCategory>;
+  /** Changes a category's icon and colour. Throws ApiError (404). */
+  updateCategory: (id: string, input: Pick<CustomCategory, "icon" | "colour">) => Promise<CustomCategory>;
+  /**
+   * Deletes a category of your own, moving its payments to `moveTo`, then reloads transactions and limits.
+   * Resolves the number of payments moved. Throws ApiError.
+   */
+  deleteCategory: (id: string, moveTo: string) => Promise<number>;
+  /** Savings goals in the server's order (active oldest first, then archived); null until loaded. */
+  goals: Goal[] | null;
+  /** The last load of `goals` failed (it keeps its last value; still null when none ever loaded). */
+  goalsFailed: boolean;
+  /** Reloads `goals`; never throws: resolves false when it failed (which also sets `goalsFailed`). */
+  refreshGoals: () => Promise<boolean>;
+  /**
+   * Adds a goal, or replaces every field of goal `id`. Throws ApiError (409 "Another goal uses #phone.", 422).
+   * When the list never loaded, it reloads instead of showing only the saved goal.
+   */
+  saveGoal: (input: GoalInput, id?: string) => Promise<Goal>;
+  /** Deletes a goal for good. Throws ApiError. */
+  removeGoal: (id: string) => Promise<void>;
   /** Alert settings and the like; null until loaded, or when the server didn't answer. */
   settings: Settings | null;
   /** Changes only the keys given. Throws ApiError; a 422 message names the key ("<key>: <message>"). */
@@ -179,6 +223,13 @@ interface DataContextValue {
    * when there is none). The rows change at once; the next poll brings the server's copies.
    */
   cancelRefund: (id: string) => Promise<void>;
+  /**
+   * Replaces a payment's lend & borrow entries ([] removes them all). The row's counted amount changes at once.
+   * Throws ApiError (422 with the server's text; 404/409 when the payment changed elsewhere, which also polls).
+   */
+  saveLinkedEntries: (id: string, entries: LedgerEntryInput[]) => Promise<LinkedEntries>;
+  /** Removes one lend & borrow entry (a linked one leaves its payment too), then polls. Throws ApiError. */
+  deleteLedgerEntry: (id: string) => Promise<void>;
   /** Hides a transaction now and deletes it after `UNDO_MS`, unless undone. */
   deleteTransaction: (id: string) => void;
   /** Brings back the last deleted transaction while its undo window is open. */
@@ -248,6 +299,8 @@ type LoadResult =
       inbox: Inbox;
       settings: Settings | null;
       periods: PayPeriods | null;
+      goals: Goal[] | null;
+      categories: CustomCategory[] | null;
     }
   | { kind: "signed-out" }
   | { kind: "error"; message: string };
@@ -255,15 +308,21 @@ type LoadResult =
 async function fetchEverything(): Promise<LoadResult> {
   try {
     const user = await getMe();
-    const [list, balance, inbox, settings, periods] = await Promise.all([
+    const [list, balance, inbox, settings, periods, goals, categories] = await Promise.all([
       getAllTransactions(),
-      // The balance, notifications, settings and pay periods are optional; never let them block the dashboard.
+      // The balance, notifications, settings, pay periods, goals and categories are optional; never let them block
+      // the dashboard.
       getBalance().catch(() => null),
       getNotifications().catch(() => EMPTY_INBOX),
       getSettings().catch(() => null),
       getPeriods().catch(() => null),
+      getGoals().catch(() => null),
+      getCategories().then(
+        (c) => c.custom,
+        () => null,
+      ),
     ]);
-    return { kind: "ok", user, txns: prepare(list), balance, inbox, settings, periods };
+    return { kind: "ok", user, txns: prepare(list), balance, inbox, settings, periods, goals, categories };
   } catch (e) {
     if (e instanceof ApiError && e.status === 401) return { kind: "signed-out" };
     return { kind: "error", message: e instanceof Error ? e.message : "Something went wrong." };
@@ -287,6 +346,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const [limits, setLimits] = useState<LimitsSummary | null>(null);
   const [settings, setSettings] = useState<Settings | null>(null); // not polled; reloads with Sync
   const [periods, setPeriods] = useState<PayPeriods | null>(null); // null = never loaded: calendar months
+  const [goals, setGoals] = useState<Goal[] | null>(null); // not polled; reloads with Sync
+  const [goalsFailed, setGoalsFailed] = useState(false);
+  const [customCategories, setCustomCategories] = useState<CustomCategory[]>([]); // likewise
   const [recurring, setRecurring] = useState<RecurringSummary | null>(null);
   const [recurringFailed, setRecurringFailed] = useState(false);
   const [upcoming, setUpcoming] = useState<UpcomingList | null>(null);
@@ -307,6 +369,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
   const apply = useCallback((result: LoadResult, initial: boolean) => {
     if (result.kind === "ok") {
       const now = dayKey(Date.now());
+      // Registered before anything renders with them (icons, colours, pickers); a failed load keeps the last list.
+      if (result.categories) registerCustomCategories(result.categories);
+      setCustomCategories((current) => (!result.categories || same(current, result.categories) ? current : result.categories));
       setUser(result.user);
       setTxns(result.txns);
       setBalance(result.balance);
@@ -315,6 +380,9 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setSettings((current) => (!result.settings || same(current, result.settings) ? current : result.settings));
       // Likewise pay periods: a failed load keeps the last list (none at all means calendar months).
       setPeriods((current) => (!result.periods || same(current, result.periods) ? current : result.periods));
+      // And goals, flagged like recurring so the Goals screen can offer Try again.
+      setGoals((current) => (!result.goals || same(current, result.goals) ? current : result.goals));
+      setGoalsFailed(!result.goals);
       setToday(now);
       setMonth((m) => m || monthCalendar(result.periods, now).current);
       setCurrency((c) => c || preferredCurrency(result.txns));
@@ -521,8 +589,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     return () => window.clearInterval(id);
   }, [status, poll]);
 
-  const refresh = useCallback(() => load(status !== "ready"), [load, status]);
-
   const signOut = useCallback(async () => {
     const waiting = pendingDelete.current; // a delete still waiting for its undo window goes first
     if (waiting) {
@@ -541,6 +607,10 @@ export function DataProvider({ children }: { children: ReactNode }) {
       setLimits(null);
       setSettings(null);
       setPeriods(null);
+      setGoals(null);
+      setGoalsFailed(false);
+      registerCustomCategories([]);
+      setCustomCategories([]);
       setRecurring(null);
       setRecurringFailed(false);
       setUpcoming(null);
@@ -561,6 +631,12 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
   const saveLimits = useCallback(async (body: LimitsInput) => {
     const next = await apiSaveLimits(body);
+    setLimits(next);
+    return next;
+  }, []);
+
+  const saveRollover = useCallback(async (category: string | null, enabled: boolean) => {
+    const next = await apiSetRollover(category, enabled);
     setLimits(next);
     return next;
   }, []);
@@ -595,6 +671,70 @@ export function DataProvider({ children }: { children: ReactNode }) {
     setSettings(next);
     return next;
   }, []);
+
+  const addCategory = useCallback(async (input: Omit<CustomCategory, "id">) => {
+    const created = await apiAddCategory(input);
+    // Registered first, so the pickers and icons know it when the new state renders.
+    const next = [...registeredCategories().filter((c) => c.id !== created.id), created];
+    registerCustomCategories(next);
+    setCustomCategories(next);
+    return created;
+  }, []);
+
+  const updateCategory = useCallback(async (id: string, input: Pick<CustomCategory, "icon" | "colour">) => {
+    const saved = await apiUpdateCategory(id, input);
+    const next = registeredCategories().map((c) => (c.id === id ? saved : c));
+    registerCustomCategories(next);
+    setCustomCategories(next);
+    return saved;
+  }, []);
+
+  const loadGoals = useCallback(
+    () =>
+      getGoals().then(
+        (next) => {
+          setGoals((current) => (same(current, next) ? current : next));
+          setGoalsFailed(false);
+          return true;
+        },
+        () => {
+          setGoalsFailed(true);
+          return false;
+        },
+      ),
+    [],
+  );
+
+  const saveGoal = useCallback(
+    async (input: GoalInput, id?: string) => {
+      const saved = id ? await apiUpdateGoal(id, input) : await apiCreateGoal(input);
+      // Never merged into a list that didn't load: that would show only this goal.
+      setGoals((current) => current && sortGoals([...current.filter((g) => g.id !== saved.id), saved]));
+      if (goals === null) void loadGoals();
+      return saved;
+    },
+    [goals, loadGoals],
+  );
+
+  const removeGoal = useCallback(async (id: string) => {
+    await apiDeleteGoal(id);
+    setGoals((current) => current && current.filter((g) => g.id !== id));
+  }, []);
+
+  const refresh = useCallback(() => load(status !== "ready"), [load, status]);
+
+  const deleteCategory = useCallback(
+    async (id: string, moveTo: string) => {
+      const { moved } = await apiDeleteCategory(id, moveTo);
+      const next = registeredCategories().filter((c) => c.id !== id);
+      registerCustomCategories(next);
+      setCustomCategories(next);
+      await refresh(); // its payments moved to another category
+      void loadLimits(); // its limit went with it
+      return moved;
+    },
+    [refresh, loadLimits],
+  );
 
   const setPayday = useCallback(
     async (on: boolean) => {
@@ -702,6 +842,35 @@ export function DataProvider({ children }: { children: ReactNode }) {
       void poll();
     },
     [patchRows, poll],
+  );
+
+  const saveLinkedEntries = useCallback(
+    async (id: string, entries: LedgerEntryInput[]) => {
+      let saved: LinkedEntries;
+      try {
+        saved = await apiSaveLinkedEntries(id, entries);
+      } catch (e) {
+        if (e instanceof ApiError && (e.status === 404 || e.status === 409)) void poll(); // changed elsewhere
+        throw e;
+      }
+      const row = txns.find((t) => t.id === id);
+      if (row) {
+        // The server's copy of the row, but for these two fields (prepare normalises the timestamp and counts it).
+        const [patched] = prepare([{ ...row, linked_amount: saved.linked_amount, updated_at: saved.updated_at }]);
+        setTxns((current) => mergeTransactions(current, [patched]));
+        if (Date.parse(patched.updated_at) > Date.parse(cursorRef.current)) cursorRef.current = patched.updated_at;
+      }
+      return saved;
+    },
+    [txns, poll],
+  );
+
+  const deleteLedgerEntry = useCallback(
+    async (id: string) => {
+      await apiDeleteLedgerEntry(id);
+      await poll(); // a linked entry moved its payment's `updated_at`
+    },
+    [poll],
   );
 
   // Deleting is instant on screen; the server hears about it after the undo window.
@@ -865,6 +1034,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       clearBalance,
       limits,
       saveLimits,
+      saveRollover,
       saveMerchantLimit,
       recurring,
       recurringFailed,
@@ -874,6 +1044,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       upcomingFailed,
       refreshUpcoming: loadUpcoming,
       dismissUpcoming,
+      customCategories,
+      addCategory,
+      updateCategory,
+      deleteCategory,
+      goals,
+      goalsFailed,
+      refreshGoals: loadGoals,
+      saveGoal,
+      removeGoal,
       settings,
       saveSettings,
       cal,
@@ -893,6 +1072,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       markNotDuplicate,
       markRefund,
       cancelRefund,
+      saveLinkedEntries,
+      deleteLedgerEntry,
       deleteTransaction,
       undoDelete,
       deletion,
@@ -926,6 +1107,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
       clearBalance,
       limits,
       saveLimits,
+      saveRollover,
       saveMerchantLimit,
       recurring,
       recurringFailed,
@@ -935,6 +1117,15 @@ export function DataProvider({ children }: { children: ReactNode }) {
       upcomingFailed,
       loadUpcoming,
       dismissUpcoming,
+      customCategories,
+      addCategory,
+      updateCategory,
+      deleteCategory,
+      goals,
+      goalsFailed,
+      loadGoals,
+      saveGoal,
+      removeGoal,
       settings,
       saveSettings,
       cal,
@@ -954,6 +1145,8 @@ export function DataProvider({ children }: { children: ReactNode }) {
       markNotDuplicate,
       markRefund,
       cancelRefund,
+      saveLinkedEntries,
+      deleteLedgerEntry,
       deleteTransaction,
       undoDelete,
       deletion,

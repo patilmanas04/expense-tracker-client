@@ -2,12 +2,21 @@ import type {
   Balance,
   BalanceBreakdown,
   Cadence,
+  CashEntryInput,
+  Categories,
   CategoryRule,
   CategoryRuleInput,
+  CustomCategory,
+  Goal,
+  GoalInput,
   Inbox,
   KnownMerchant,
+  Ledger,
+  LedgerEntry,
+  LedgerEntryInput,
   LimitsInput,
   LimitsSummary,
+  LinkedEntries,
   MerchantLimitInput,
   MerchantName,
   MerchantPreview,
@@ -149,6 +158,17 @@ export const saveMerchantLimit = (body: MerchantLimitInput) =>
     body: JSON.stringify(body),
   }).then(withMerchants);
 
+/**
+ * "Roll over unused amount" on the overall monthly limit (null or "All") or a category's. Turning it on needs a
+ * monthly limit (422 "Set a monthly limit first."); it starts next month. Returns the whole summary.
+ */
+export const setRollover = (category: string | null, enabled: boolean) =>
+  request<LimitsSummary>("/api/v1/limits/rollover", {
+    method: "PUT",
+    headers: { Accept: "application/json", "Content-Type": "application/json" },
+    body: JSON.stringify({ category, enabled }),
+  }).then(withMerchants);
+
 /** Merchants paid before or typed in earlier, most payments first: the limit sheet's suggestions. */
 export const getKnownMerchants = () => request<KnownMerchant[]>("/api/v1/limits/merchants/known");
 
@@ -193,6 +213,63 @@ export const getRefund = (transactionId: string) =>
 /** "No refund expected": removes the watch (a confirmed refund's credit stops showing it too). 404 when there is none. */
 export const cancelRefund = (transactionId: string) =>
   request<void>(`/api/v1/refunds/${encodeURIComponent(transactionId)}`, { method: "DELETE" });
+
+/** Everyone you've split with, lent to or borrowed from, with their balance and entries. */
+export const getLedger = () => request<Ledger>("/api/v1/ledger");
+
+/** An entry without a payment ("Lent ₹500 cash to Rahul"); 422 with the server's text when it isn't valid. */
+export const addCashEntry = (input: CashEntryInput) =>
+  request<LedgerEntry>("/api/v1/ledger", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) });
+
+/** Removes one entry (cash or linked; a linked one leaves its payment). 404 when it's gone. */
+export const deleteLedgerEntry = (id: string) =>
+  request<void>(`/api/v1/ledger/${encodeURIComponent(id)}`, { method: "DELETE" });
+
+/** A payment's lend & borrow entries, oldest first. 404 when the payment is gone. */
+export const getLinkedEntries = (transactionId: string) =>
+  request<LedgerEntry[]>(`/api/v1/transactions/${encodeURIComponent(transactionId)}/ledger`);
+
+/** Replaces every entry on a payment ([] removes them all). 422 with the server's text, 404 when the payment is gone. */
+export const saveLinkedEntries = (transactionId: string, entries: LedgerEntryInput[]) =>
+  request<LinkedEntries>(`/api/v1/transactions/${encodeURIComponent(transactionId)}/ledger`, {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify({ entries }),
+  });
+
+/** Built-in categories and your own (oldest first). */
+export const getCategories = () => request<Categories>("/api/v1/categories");
+
+/** 409 when the name is taken (any case) or there are 30 already; 422 with the server's text. */
+export const addCategory = (input: Omit<CustomCategory, "id">) =>
+  request<CustomCategory>("/api/v1/categories", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) });
+
+/** Icon and colour only: a category can't be renamed. 404 "Category not found." */
+export const updateCategory = (id: string, input: Pick<CustomCategory, "icon" | "colour">) =>
+  request<CustomCategory>(`/api/v1/categories/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: JSON_HEADERS,
+    body: JSON.stringify(input),
+  });
+
+/** Deletes it and moves its payments (and merchant memory) to `moveTo`; its limit and rules go. */
+export const deleteCategory = (id: string, moveTo: string) =>
+  request<{ moved: number }>(`/api/v1/categories/${encodeURIComponent(id)}?move_to=${encodeURIComponent(moveTo)}`, {
+    method: "DELETE",
+  });
+
+/** Savings goals: active ones oldest first, then archived. */
+export const getGoals = () => request<Goal[]>("/api/v1/goals");
+
+/** 409 "Another goal uses #phone." when an active goal has the tag; 422 with the server's text. */
+export const createGoal = (input: GoalInput) =>
+  request<Goal>("/api/v1/goals", { method: "POST", headers: JSON_HEADERS, body: JSON.stringify(input) });
+
+/** Replaces every field. 404 "Goal not found.", 409 as createGoal. */
+export const updateGoal = (id: string, input: GoalInput) =>
+  request<Goal>(`/api/v1/goals/${encodeURIComponent(id)}`, { method: "PUT", headers: JSON_HEADERS, body: JSON.stringify(input) });
+
+export const deleteGoal = (id: string) => request<void>(`/api/v1/goals/${encodeURIComponent(id)}`, { method: "DELETE" });
 
 /** Every setting, defaults filled in. */
 export const getSettings = () => request<Settings>("/api/v1/settings");

@@ -1,6 +1,21 @@
 "use client";
 
-import { ChevronRight, Gauge, Landmark, ListChecks, LogOut, Mail, RefreshCw, Scale, Share, SquarePlus } from "lucide-react";
+import {
+  ChevronRight,
+  Gauge,
+  HandCoins,
+  Landmark,
+  ListChecks,
+  LogOut,
+  Mail,
+  RefreshCw,
+  Scale,
+  Share,
+  SquarePlus,
+  Tag,
+  Target,
+  type LucideIcon,
+} from "lucide-react";
 import Link from "next/link";
 import { useEffect, useId, useMemo, useState, type FormEvent, type ReactNode } from "react";
 
@@ -13,7 +28,10 @@ import { FolioMark } from "../brand";
 import { POLL_INTERVAL_MS, useData } from "../data-provider";
 import { useTheme, type Theme } from "../theme";
 import { Amount, Avatar, Card, IconTile, Segmented, SelectPill, Switch } from "../ui";
+import { GOALS_PAGE } from "../goals-card";
 import { BALANCE_PAGE } from "./balance-breakdown";
+import { CATEGORIES_PAGE } from "./categories";
+import { LEDGER_PAGE } from "./ledger";
 import { LIMITS_PAGE, LimitMeter, limitCount } from "./limits";
 import { RULES_PAGE } from "./rules";
 import { SafeToSpendRow } from "./safe-to-spend";
@@ -51,6 +69,12 @@ export function SettingsView() {
       <LimitsSection />
 
       <RulesSection />
+
+      <LinkSection id="lend-borrow" href={LEDGER_PAGE} icon={HandCoins} title="Lend & borrow" detail="Splits, loans and who owes whom" />
+
+      <LinkSection id="goals" href={GOALS_PAGE} icon={Target} title="Goals" detail="Save toward something with a tag" />
+
+      <LinkSection id="categories" href={CATEGORIES_PAGE} icon={Tag} title="Categories" detail="Add your own, like Pets or Gym" />
 
       <EmailAlertsSection />
 
@@ -742,7 +766,7 @@ function LimitsSection() {
         {summary ? (
           <div className="space-y-4 p-4">
             <LimitMeter title="This week" period={summary.weekly} currency={summary.currency} />
-            <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} />
+            <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} rollover={summary.rollover} />
           </div>
         ) : (
           <div className="h-32 animate-pulse bg-canvas/60" aria-label="Loading limits" />
@@ -778,6 +802,27 @@ function RulesSection() {
           <span className="min-w-0 flex-1">
             <span className="block text-[15px] font-medium text-ink">Names and rules</span>
             <span className="block text-[13px] text-ink-2">Merge merchant names, set categories by rule</span>
+          </span>
+          <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
+        </Link>
+      </Card>
+    </section>
+  );
+}
+
+/** The way into a page of its own (Lend & borrow, Goals, Categories), like Names and rules. */
+function LinkSection({ id, href, icon, title, detail }: { id: string; href: string; icon: LucideIcon; title: string; detail: string }) {
+  return (
+    <section id={id} className="mt-3 scroll-mt-6">
+      <Card className="overflow-hidden">
+        <Link
+          href={href}
+          className="flex min-h-16 items-center gap-3.5 px-4 py-3 transition hover:bg-canvas/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-violet"
+        >
+          <IconTile icon={icon} color="#8458F5" size="sm" />
+          <span className="min-w-0 flex-1">
+            <span className="block truncate text-[15px] font-medium text-ink">{title}</span>
+            <span className="block truncate text-[13px] text-ink-2">{detail}</span>
           </span>
           <ChevronRight size={18} className="shrink-0 text-ink-3" aria-hidden />
         </Link>

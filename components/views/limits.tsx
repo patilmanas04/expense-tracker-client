@@ -15,15 +15,15 @@ import {
 
 import { leftToSpend, type LeftToSpend } from "@/lib/analytics";
 import { getKnownMerchants, previewMerchant, settingError } from "@/lib/api";
-import { ALL_SPENDING, LIMIT_CATEGORIES, PALETTE } from "@/lib/categories";
-import { formatMoney, formatPercent, parseAmountInput, shortDayLabel, toMinor } from "@/lib/format";
+import { ALL_SPENDING, PALETTE, limitCategories } from "@/lib/categories";
+import { formatMoney, formatPercent, monthName, parseAmountInput, shiftMonth, shortDayLabel, toMinor } from "@/lib/format";
 import { cameFromApp } from "@/lib/nav-history";
 import type { KnownMerchant, LimitsSummary, MerchantLimitStatus, MerchantPreview, PeriodLimit } from "@/lib/types";
 
 import { useData } from "../data-provider";
 import { lockPageScroll, useSheetDrag } from "../sheet-drag";
 import { SwipeToDelete } from "../swipe-to-delete";
-import { Card, CategoryTile, cx, IconTile, ProgressBar, Segmented, SelectPill } from "../ui";
+import { Card, CategoryTile, cx, IconTile, ProgressBar, Segmented, SelectPill, Switch } from "../ui";
 
 export const LIMITS_PAGE = "/settings/limits";
 
@@ -78,13 +78,20 @@ const NO_NAME = "Enter a merchant name.";
 /** The server's answer to saving a new merchant without a category (also checked here first). */
 const PICK_CATEGORY = "Pick a category for this new merchant.";
 
-/** The limits currently saved for "All spending" or one category. */
+/** A period's limit as you set it: with rollover carrying, `limit` is this month's rollover figure instead (D6). */
+const baseLimit = (period: PeriodLimit | undefined) => (period ? (period.base ?? period.limit) : null);
+
+/** The limits currently saved for "All spending" or one category (the set amounts, never the rollover figure). */
 function limitsFor(summary: LimitsSummary | null, target: string) {
   if (!summary) return { weekly: null, monthly: null };
-  if (target === ALL_SPENDING) return { weekly: summary.weekly.limit, monthly: summary.monthly.limit };
+  if (target === ALL_SPENDING) return { weekly: baseLimit(summary.weekly), monthly: baseLimit(summary.monthly) };
   const rule = summary.categories.find((c) => c.category === target);
-  return { weekly: rule?.weekly.limit ?? null, monthly: rule?.monthly.limit ?? null };
+  return { weekly: baseLimit(rule?.weekly), monthly: baseLimit(rule?.monthly) };
 }
+
+/** Whether "Roll over unused amount" is on for "All spending" or one category. */
+const rolloverFor = (summary: LimitsSummary | null, target: string) =>
+  !summary ? false : target === ALL_SPENDING ? summary.rollover === true : summary.categories.find((c) => c.category === target)?.rollover === true;
 
 const hasLimit = (summary: LimitsSummary | null, target: string) => {
   const { weekly, monthly } = limitsFor(summary, target);
@@ -122,7 +129,7 @@ export function LimitsView() {
   // + opens on the first thing without a limit: all spending, then the categories in order.
   // With every one set, there's no category left to add, so it opens on a merchant instead.
   const add = () => {
-    const free = [ALL_SPENDING, ...LIMIT_CATEGORIES].find((name) => !hasLimit(summary, name));
+    const free = [ALL_SPENDING, ...limitCategories()].find((name) => !hasLimit(summary, name));
     setEditing(free ? { kind: "category", target: free, adding: true } : { kind: "merchant", target: "", adding: true });
   };
 
@@ -175,7 +182,7 @@ export function LimitsView() {
               stays
             >
               <LimitMeter title="This week" period={summary.weekly} currency={summary.currency} />
-              <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} />
+              <LimitMeter title="This month" period={summary.monthly} currency={summary.currency} rollover={summary.rollover} />
             </LimitGroup>
           </Card>
 
@@ -192,7 +199,9 @@ export function LimitsView() {
                   onDelete={() => deleteCategoryLimit(c.category)}
                 >
                   {c.weekly.limit !== null ? <LimitMeter title="This week" period={c.weekly} currency={summary.currency} /> : null}
-                  {c.monthly.limit !== null ? <LimitMeter title="This month" period={c.monthly} currency={summary.currency} /> : null}
+                  {c.monthly.limit !== null ? (
+                    <LimitMeter title="This month" period={c.monthly} currency={summary.currency} rollover={c.rollover} />
+                  ) : null}
                 </LimitGroup>
               ))}
             </Card>
@@ -269,7 +278,7 @@ export function LimitsView() {
  * Category | Merchant switch; editing keeps the kind (and a merchant's name) fixed.
  */
 function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => void }) {
-  const { limits: summary, saveLimits, saveMerchantLimit } = useData();
+  const { limits: summary, saveLimits, saveRollover, saveMerchantLimit } = useData();
   const sheetRef = useRef<HTMLDivElement>(null);
   const weeklyRef = useRef<HTMLInputElement>(null);
   const merchantRef = useRef<HTMLInputElement>(null);
@@ -296,6 +305,8 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
   const [preview, setPreview] = useState<(MerchantPreview & { name: string }) | null>(null);
   const previewing = useRef({ timer: 0, request: 0 });
   const [category, setCategory] = useState("");
+  // "Roll over unused amount" as switched here; null = as saved for the target.
+  const [rolloverChoice, setRolloverChoice] = useState<boolean | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [keyboard, setKeyboard] = useState(0);
@@ -309,6 +320,10 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
   const savedMerchant = fixedLimit ?? merchantLimit(summary, name);
   const existing = merchantMode ? savedMerchant !== undefined : hasLimit(summary, target);
   const empty = !weekly.trim() && !monthly.trim();
+  const savedRollover = rolloverFor(summary, target);
+  const rollover = rolloverChoice ?? savedRollover;
+  // Only the overall or a category's monthly limit rolls over; clearing Monthly turns it off on the server.
+  const showRollover = !merchantMode && monthly.trim() !== "";
   // The server's answer counts only while it's about the name in the field now.
   const answer = preview?.name === name ? preview : null;
   // A new limit's name needs a word, as on the server; until it has one there's nothing to add or ask.
@@ -462,6 +477,7 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
   // Picking something else shows its saved amounts.
   const choose = (which: string) => {
     setTarget(which);
+    setRolloverChoice(null);
     const current = limitsFor(summary, which);
     setWeekly(limitText(current.weekly));
     setMonthly(limitText(current.monthly));
@@ -491,8 +507,14 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
         const body = { id: savedMerchant?.id ?? null, merchant: name, weekly_limit, monthly_limit, category: askCategory ? category : null };
         save = () => saveMerchantLimit(body);
       } else {
-        const body = { category: target === ALL_SPENDING ? null : target, weekly_limit, monthly_limit };
-        save = () => saveLimits(body);
+        const scope = target === ALL_SPENDING ? null : target;
+        const body = { category: scope, weekly_limit, monthly_limit };
+        // The limit first, then the switch only when it changed (D9).
+        const switchTo = monthly_limit !== null && rollover !== savedRollover ? rollover : null;
+        save = async () => {
+          await saveLimits(body);
+          if (switchTo !== null) await saveRollover(scope, switchTo);
+        };
       }
     } catch (err) {
       return setError((err as Error).message);
@@ -580,7 +602,7 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
                     className="h-12 w-full appearance-none truncate rounded-2xl border border-line bg-surface pr-10 pl-4 text-[16px] font-medium text-ink outline-none focus:border-violet/50 focus:ring-4 focus:ring-violet/15"
                   >
                     <option value={ALL_SPENDING}>{hasLimit(summary, ALL_SPENDING) ? "All spending · has a limit" : "All spending"}</option>
-                    {LIMIT_CATEGORIES.map((option) => (
+                    {limitCategories().map((option) => (
                       <option key={option} value={option}>
                         {withLimits.has(option) ? `${option} · has a limit` : option}
                       </option>
@@ -640,7 +662,7 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
                         <option value="" disabled>
                           Pick a category
                         </option>
-                        {LIMIT_CATEGORIES.map((option) => (
+                        {limitCategories().map((option) => (
                           <option key={option} value={option}>
                             {option}
                           </option>
@@ -658,6 +680,26 @@ function LimitSheet({ initial, onClose }: { initial: Editing; onClose: () => voi
               <LimitField id="weekly-limit" label="Weekly limit" value={weekly} onChange={setWeekly} inputRef={weeklyRef} onEdit={() => setError(null)} />
               <LimitField id="monthly-limit" label="Monthly limit" value={monthly} onChange={setMonthly} onEdit={() => setError(null)} />
             </div>
+            {showRollover ? (
+              <div className="mt-4 flex items-start gap-3 rounded-2xl bg-track px-4 py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="text-[15px] text-ink">Roll over unused amount</p>
+                  <p className="mt-0.5 text-[13px] leading-snug text-ink-2">
+                    Next month&apos;s limit adds what you didn&apos;t spend, or takes off what you overspent (between ₹0 and
+                    twice the limit). Starts next month.
+                  </p>
+                </div>
+                <Switch
+                  checked={rollover}
+                  onChange={(on) => {
+                    setRolloverChoice(on);
+                    setError(null);
+                  }}
+                  label="Roll over unused amount"
+                  disabled={saving}
+                />
+              </div>
+            ) : null}
             <p className="mt-2 text-[13px] leading-relaxed text-ink-2">
               {merchantMode
                 ? `Counts payments whose name contains ${name ? `“${name}”` : "the merchant’s name"} as whole words, with the same upper and lower case.`
@@ -967,9 +1009,37 @@ function paceText(pace: LeftToSpend, currency: string) {
   return `${left} · about ${money(pace.perDayMinor)} a day for ${pace.days} days`;
 }
 
-/** Spent this week or month, against its limit when there is one. */
-export function LimitMeter({ title, period, currency }: { title: string; period: PeriodLimit; currency: string }) {
-  const { today, settings } = useData();
+/** "₹5,800 limit (₹5,000 + ₹800 rolled over)", or why there's no carry; null when rollover isn't in play. */
+function rolloverText(period: PeriodLimit, rollover: boolean, currentMonth: string, currency: string): string | null {
+  const money = (minor: number) => formatMoney(minor, currency, { decimals: minor % 100 !== 0 });
+  const carried = period.carried;
+  if (typeof carried === "number" && period.limit !== null) {
+    const limit = money(toMinor(period.limit));
+    const base = money(toMinor(period.base ?? period.limit - carried));
+    if (carried > 0) return `${limit} limit (${base} + ${money(toMinor(carried))} rolled over)`;
+    if (carried < 0) return `${limit} limit (${base} − ${money(toMinor(-carried))} overspent last month)`;
+    return "Nothing rolled over from last month";
+  }
+  if (rollover && currentMonth) return `Rolls over from ${monthName(shiftMonth(currentMonth, 1))}`;
+  return null;
+}
+
+/**
+ * Spent this week or month, against its limit when there is one. `rollover`: "Roll over unused amount" is on for
+ * this monthly limit (shows when it starts while nothing carries yet).
+ */
+export function LimitMeter({
+  title,
+  period,
+  currency,
+  rollover = false,
+}: {
+  title: string;
+  period: PeriodLimit;
+  currency: string;
+  rollover?: boolean;
+}) {
+  const { today, settings, cal } = useData();
   const range = `${shortDayLabel(period.start)} – ${shortDayLabel(period.end)}`;
   const spent = formatMoney(toMinor(period.spent), currency);
   if (period.limit === null) {
@@ -985,7 +1055,9 @@ export function LimitMeter({ title, period, currency }: { title: string; period:
       </div>
     );
   }
-  const ratio = period.spent / period.limit;
+  // A rollover limit can be ₹0 (last month overspent by the whole limit): reached at once.
+  const ratio = period.limit > 0 ? period.spent / period.limit : 1;
+  const carry = rolloverText(period, rollover, cal.current, currency);
   // Amber from the warning level (80% when warnings are Off or settings haven't loaded).
   const warnAt = (settings?.["limits.warn_percent"] ?? 80) / 100;
   const color = ratio >= 1 ? "#D14429" : ratio >= warnAt ? "#EDA100" : "#8458F5";
@@ -1003,6 +1075,7 @@ export function LimitMeter({ title, period, currency }: { title: string; period:
         {ratio >= 1 ? " · limit reached" : ""}
         {period.alerted ? " · notified" : ""}
       </p>
+      {carry ? <p className="mt-0.5 text-[13px] text-ink-2">{carry}</p> : null}
       <div className="mt-2">
         <ProgressBar value={ratio} color={color} label={`${title}: ${formatPercent(ratio)} of limit`} />
       </div>

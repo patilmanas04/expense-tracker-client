@@ -7,6 +7,7 @@ import { formatMoney } from "@/lib/format";
 
 import { UNDO_MS, useData } from "./data-provider";
 import { transactionTitle } from "./transactions";
+import { cx } from "./ui";
 
 /** "Deleted Zomato · −₹790.03  4s  Undo", just above the tab bar, while a delete can still be undone. */
 export function UndoToast() {
@@ -36,15 +37,26 @@ export function UndoToast() {
   const secondsLeft = Math.min(UNDO_MS / 1000, Math.max(1, Math.ceil((deletion.until - now) / 1000)));
   const name = transactionTitle(txn);
   const amount = txn.is_parsed ? ` · ${formatMoney(txn.type === "DEBIT" ? -txn.minor : txn.minor, txn.currency, { signed: true })}` : "";
+  // Its lend & borrow entries go with it; no amount, so the longer line still fits (in two lines at most).
+  const linked = !failed && txn.linked_amount > 0;
   return (
     <div className="pointer-events-none fixed inset-x-4 bottom-[calc(max(env(safe-area-inset-bottom),0.75rem)+78px)] z-50 flex justify-center lg:bottom-6 lg:left-64">
       <div
         key={`${txn.id}:${deletion.status}`}
         role={failed ? "alert" : "status"}
-        className="animate-sheet pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-full bg-ink py-2 pr-2 pl-4 text-sm text-canvas shadow-float"
+        className={cx(
+          "animate-sheet pointer-events-auto flex w-full max-w-md items-center gap-3 bg-ink py-2 pr-2 pl-4 text-sm text-canvas shadow-float",
+          linked ? "rounded-[24px]" : "rounded-full",
+        )}
       >
         <Trash2 size={16} className="shrink-0 text-canvas/70" aria-hidden />
-        <span className="min-w-0 flex-1 truncate">{failed ? `Couldn't delete ${name}, so it's back.` : `Deleted ${name}${amount}`}</span>
+        <span className={cx("min-w-0 flex-1", linked ? "line-clamp-2 break-words" : "truncate")}>
+          {failed
+            ? `Couldn't delete ${name}, so it's back.`
+            : linked
+              ? `Deleted ${name} and its lend & borrow entries`
+              : `Deleted ${name}${amount}`}
+        </span>
         {failed ? (
           <button type="button" onClick={dismissDeletion} aria-label="Dismiss" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-canvas/15">
             <X size={16} />

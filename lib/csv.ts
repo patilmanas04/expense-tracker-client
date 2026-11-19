@@ -1,9 +1,9 @@
 import { countsAs, type Txn } from "./analytics";
 import { MANUAL, categoryName } from "./categories";
 import { amountCell, toCsv, type CsvCell } from "./csv-format";
-import { timeLabel24 } from "./format";
+import { timeLabel24, toMinor } from "./format";
 
-/** The export's columns, in order. Doc 15 adds "Lent / borrowed" after "Counts as". */
+/** The export's columns, in order. */
 export const CSV_COLUMNS = [
   "Date",
   "Time",
@@ -13,6 +13,7 @@ export const CSV_COLUMNS = [
   "Merchant",
   "Category",
   "Counts as",
+  "Lent / borrowed",
   "Account",
   "Reference",
   "Note",
@@ -24,8 +25,10 @@ const text = (value: string): CsvCell => ({ value, text: true });
 const plain = (value: string): CsvCell => ({ value, text: false });
 
 /**
- * One row per transaction, in the order given. Unreadable SMS leave Type, Amount, Merchant and
- * Category empty (their values are placeholders), so a spreadsheet sum never sees a fake amount.
+ * One row per transaction, in the order given. Unreadable SMS leave Type, Amount, Merchant, Category and
+ * Lent / borrowed empty (their values are placeholders), so a spreadsheet sum never sees a fake amount.
+ * "Lent / borrowed" is the part in lend & borrow entries (shares, loans, repayments; "0.00" when none):
+ * Amount minus it is what counts.
  */
 export function transactionRows(txns: Txn[]): CsvCell[][] {
   return txns.map((t) => {
@@ -39,6 +42,7 @@ export function transactionRows(txns: Txn[]): CsvCell[][] {
       text(t.is_parsed ? (t.merchant ?? "") : ""),
       text(t.is_parsed ? categoryName(t) : ""),
       text(countsAs(t)),
+      plain(t.is_parsed ? amountCell(toMinor(t.linked_amount)) : ""),
       text(t.account_ref ?? ""),
       text(t.reference_id ?? ""),
       text(t.notes ?? ""),

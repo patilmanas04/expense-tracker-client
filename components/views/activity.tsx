@@ -315,8 +315,8 @@ export function ActivityView() {
     let received = 0;
     for (const t of filtered) {
       if (!counts(t, currency)) continue;
-      if (t.type === "DEBIT") spent += t.minor;
-      else received += t.minor;
+      if (t.type === "DEBIT") spent += t.counted;
+      else received += t.counted;
     }
     return { spent, received };
   }, [filtered, currency]);
