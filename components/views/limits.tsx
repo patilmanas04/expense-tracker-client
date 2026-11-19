@@ -1063,6 +1063,8 @@ export function LimitMeter({
   const color = ratio >= 1 ? "#D14429" : ratio >= warnAt ? "#EDA100" : "#8458F5";
   const pace = leftToSpend(toMinor(period.limit), toMinor(period.spent), period.start, period.end, today);
   const over = pace.kind === "over";
+  // Whole rupees, unless a rollover left paise in the limit: then the same figure as the rollover line.
+  const limitMinor = toMinor(period.limit);
   return (
     <div>
       <div className="flex items-baseline justify-between gap-3">
@@ -1070,7 +1072,7 @@ export function LimitMeter({
         <span className="text-xs text-ink-2">{range}</span>
       </div>
       <p className="mt-1 text-sm text-ink-2">
-        <span className="font-semibold text-ink">{spent}</span> of {formatMoney(toMinor(period.limit), currency, { decimals: false })} ·{" "}
+        <span className="font-semibold text-ink">{spent}</span> of {formatMoney(limitMinor, currency, { decimals: limitMinor % 100 !== 0 })} ·{" "}
         {formatPercent(ratio)}
         {ratio >= 1 ? " · limit reached" : ""}
         {period.alerted ? " · notified" : ""}

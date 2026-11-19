@@ -94,7 +94,8 @@ export function UpcomingCard() {
         {items.slice(0, CARD_ROWS).map((item, index) => (
           <div key={rowKey(item, index)} className="flex items-center gap-3 px-4 py-3">
             <div className="min-w-0 flex-1">
-              <p className="truncate text-[15px] font-medium text-ink">
+              {/* Wraps (E9): a card bill's number tells one bill from another. */}
+              <p className="text-[15px] font-medium break-words text-ink">
                 {whenLabel(item, today)} · {title(item)}
               </p>
               <p className="truncate text-[13px] text-ink-2">{KIND_TEXT[item.kind]}</p>
@@ -275,7 +276,7 @@ function UpcomingRow({
   const content = (
     <>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[15px] font-semibold text-ink">{title(item)}</span>
+        <span className="block text-[15px] font-semibold break-words text-ink">{title(item)}</span>
         <span className="block truncate text-[13px] text-ink-2">{detail}</span>
         {chip ? (
           <span className="mt-1.5 flex flex-wrap gap-1.5">

@@ -247,6 +247,11 @@ export interface CategoryRule extends CategoryRuleInput {
   created_at: string;
 }
 
+/** Mirrors `RuleMatch` in the backend's rules.py: the first of your rules that matches a payment, or null. */
+export interface RuleMatch {
+  rule: CategoryRule | null;
+}
+
 /** A past payment a rule would change. Mirrors `RuleExample` in the backend's rules.py. */
 export interface RuleExample {
   id: string;

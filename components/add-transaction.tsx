@@ -6,7 +6,7 @@ import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { Txn } from "@/lib/analytics";
 
 import { useData } from "./data-provider";
-import { lockPageScroll, useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, trapTab, useSheetDrag } from "./sheet-drag";
 import { AUTO, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 
 /** Add a transaction by hand (cash, or anything without an SMS): bottom sheet on phones, dialog on desktop. */
@@ -39,17 +39,7 @@ export function AddTransactionSheet({ onClose, onAdded }: { onClose: () => void;
     amountRef.current?.focus({ preventScroll: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
-      if (e.key !== "Tab" || !sheetRef.current) return;
-      const focusable = sheetRef.current.querySelectorAll<HTMLElement>("button:not(:disabled), input, select");
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
+      if (e.key === "Tab" && sheetRef.current) trapTab(e, sheetRef.current);
     };
     document.addEventListener("keydown", onKey);
     return () => {

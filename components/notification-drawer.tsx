@@ -10,7 +10,7 @@ import { activityRequestFromLink } from "@/lib/links";
 import type { AppNotification } from "@/lib/types";
 
 import { useData } from "./data-provider";
-import { lockPageScroll, useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, trapTab, useSheetDrag } from "./sheet-drag";
 import { SwipeToDelete } from "./swipe-to-delete";
 import { IconTile, cx } from "./ui";
 
@@ -67,17 +67,7 @@ export function NotificationDrawer() {
     closeRef.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") closeNotifications();
-      if (e.key !== "Tab" || !panelRef.current) return;
-      const focusable = panelRef.current.querySelectorAll<HTMLElement>("button, [href]");
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
+      if (e.key === "Tab" && panelRef.current) trapTab(e, panelRef.current);
     };
     document.addEventListener("keydown", onKey);
     return () => {

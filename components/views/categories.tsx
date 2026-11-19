@@ -64,7 +64,17 @@ export function CategoriesView() {
     else router.replace("/settings");
   };
 
+  // The deleted category's row (where the sheet would put focus back) is gone, so focus goes to the notice
+  // when it shows (noticeShown), not to <body>.
+  const focusNoticeNext = useRef(false);
+  const noticeShown = useCallback((node: HTMLParagraphElement | null) => {
+    if (node && focusNoticeNext.current) {
+      focusNoticeNext.current = false;
+      node.focus();
+    }
+  }, []);
   const deleted = useCallback((moved: number, to: string) => {
+    focusNoticeNext.current = true;
     setOpen(null);
     setNotice(`Moved ${plural(moved, "payment", "payments")} to ${to}.`);
   }, []);
@@ -81,7 +91,11 @@ export function CategoriesView() {
 
       <div role="status">
         {notice ? (
-          <p className="mt-4 flex items-center gap-1.5 rounded-card bg-income-soft px-4 py-3 text-[13px] font-medium text-income">
+          <p
+            ref={noticeShown}
+            tabIndex={-1}
+            className="mt-4 flex items-center gap-1.5 rounded-card bg-income-soft px-4 py-3 text-[13px] font-medium text-income outline-none"
+          >
             <Check size={15} className="shrink-0" aria-hidden /> {notice}
           </p>
         ) : null}

@@ -364,8 +364,17 @@ export function ActivityView() {
     setPeriod(shiftMonth(calMonth, delta));
     setVisible(PAGE);
   };
-  // Tapping a day lists it.
+  // Tapping a day lists it. The day's button goes away with the calendar, so focus moves to the list
+  // (listBlock, when it mounts) instead of falling to <body>.
+  const focusListNext = useRef(false);
+  const listBlock = useCallback((node: HTMLDivElement | null) => {
+    if (node && focusListNext.current) {
+      focusListNext.current = false;
+      node.focus();
+    }
+  }, []);
   const pickDay = (d: string) => {
+    focusListNext.current = true;
     setDay(d);
     setPeriod(ON_DAY);
     setVisible(PAGE);
@@ -700,7 +709,7 @@ export function ActivityView() {
             </Card>
           ) : null}
 
-          <div className="mt-6">
+          <div ref={listBlock} tabIndex={-1} className="mt-6 outline-none">
             {filtered.length === 0 ? (
               <Card className="flex flex-col items-center p-8 text-center">
                 <SearchX size={28} className="text-ink-3" aria-hidden />

@@ -6,7 +6,7 @@ import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { flushSync } from "react-dom";
 
 import { carriedForward, isHeldOut, merchantKey, parsedByLabel, type Txn } from "@/lib/analytics";
-import { getRefund, mergeMerchantName } from "@/lib/api";
+import { getRefund, matchRule, mergeMerchantName } from "@/lib/api";
 import { CASH_ACCOUNT, MANUAL, UNCATEGORIZED, categoryName } from "@/lib/categories";
 import {
   dateTimeLabel,
@@ -25,7 +25,7 @@ import type { RefundWatch, TransactionPatch } from "@/lib/types";
 
 import { useData } from "./data-provider";
 import { LendBorrowCard } from "./lend-borrow-card";
-import { lockPageScroll, useSheetDrag } from "./sheet-drag";
+import { lockPageScroll, trapTab, useSheetDrag } from "./sheet-drag";
 import { FIELD, Field, TransactionFields, localInputValue, readDraft, type Draft } from "./transaction-fields";
 import { TagChips, transactionTitle } from "./transactions";
 import { Amount, CategoryTile, CheckRow, cx } from "./ui";
@@ -70,6 +70,9 @@ function SheetBody({ t }: { t: Txn }) {
   const [error, setError] = useState<string | null>(null);
   const [kept, setKept] = useState(false); // "Not a duplicate" just succeeded
   const [mergeAll, setMergeAll] = useState(false); // "Also rename the other payments named …"
+  // Whether one of your category rules matches this payment (it then decides future ones); null until known.
+  const [ruleDecides, setRuleDecides] = useState<boolean | null>(null);
+  const ruleRequest = useRef(0); // only the newest Edit's answer counts
   const editing = draft !== null;
   const editingRef = useRef(false);
   const debit = t.type === "DEBIT";
@@ -90,19 +93,7 @@ function SheetBody({ t }: { t: Txn }) {
           closeTransaction();
         }
       }
-      if (e.key !== "Tab" || !dialogRef.current) return;
-      const focusable = dialogRef.current.querySelectorAll<HTMLElement>(
-        "button:not(:disabled), [href], input, select, textarea, [tabindex]:not([tabindex='-1'])",
-      );
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (e.shiftKey && document.activeElement === first) {
-        e.preventDefault();
-        last?.focus();
-      } else if (!e.shiftKey && document.activeElement === last) {
-        e.preventDefault();
-        first?.focus();
-      }
+      if (e.key === "Tab" && dialogRef.current) trapTab(e, dialogRef.current);
     };
     document.addEventListener("keydown", onKey);
     return () => {
@@ -134,6 +125,14 @@ function SheetBody({ t }: { t: Txn }) {
     setError(null);
     setKept(false); // said once; don't repeat it on the way back from Edit
     setMergeAll(false);
+    setRuleDecides(null);
+    const request = ++ruleRequest.current;
+    matchRule(t.id).then(
+      ({ rule }) => {
+        if (ruleRequest.current === request) setRuleDecides(rule !== null);
+      },
+      () => {}, // unknown: the hint goes by what set this payment's category
+    );
   };
   const cancelEditing = () => {
     setDraft(null);
@@ -227,7 +226,7 @@ function SheetBody({ t }: { t: Txn }) {
   const recategorised = draft !== null && draft.category !== categoryName(t);
   const categoryHint = !recategorised
     ? null
-    : t.parsed_by === "regex+rule" // a category rule set it: the rule, not this edit, decides future payments
+    : (ruleDecides ?? t.parsed_by === "regex+rule") // a category rule matches it: the rule, not this edit, decides future payments
       ? "Changes this payment only. Future payments like this follow your category rule."
       : !name
         ? null

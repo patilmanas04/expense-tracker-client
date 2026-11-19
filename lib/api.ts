@@ -27,6 +27,7 @@ import type {
   RecurringSummary,
   RefundWatch,
   RefundWatchInput,
+  RuleMatch,
   RulePreview,
   RuleSaved,
   SafeToSpend,
@@ -301,6 +302,10 @@ export const deleteMerchantName = (id: string) => request<void>(`/api/v1/merchan
 
 /** Category rules, newest first (the newest rule that matches wins). */
 export const getRules = () => request<CategoryRule[]>("/api/v1/rules");
+
+/** The rule that decides this payment's category for later SMS like it (it runs before a category you pick), or null. */
+export const matchRule = (transactionId: string) =>
+  request<RuleMatch>(`/api/v1/rules/match/${encodeURIComponent(transactionId)}`);
 
 /** Which past payments the rule would change; writes nothing. With `id`, the rule takes that saved rule's place. */
 export const previewRule = ({ id, ...input }: CategoryRuleInput & { id?: string }) =>

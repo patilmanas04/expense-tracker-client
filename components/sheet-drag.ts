@@ -94,3 +94,27 @@ export function lockPageScroll() {
     root.style.paddingRight = paddingRight;
   };
 }
+
+/** What Tab steps through in a sheet (hidden ones are skipped in trapTab). */
+const TABBABLE =
+  ':is(button, input, select, textarea, a[href], [tabindex]):not(:disabled):not([tabindex="-1"]):not([type="hidden"])';
+
+/**
+ * Keeps Tab and Shift+Tab inside a modal sheet (`dialog`, the element with aria-modal). Call it from the sheet's
+ * keydown listener for Tab. It moves focus itself on every Tab, not only at the ends: Safari leaves buttons out of
+ * the Tab order, so from the last field before a button it would step straight out to the page. From outside the
+ * sheet (<body>, the page behind) Tab goes to the first element and Shift+Tab to the last; a dialog opened on top
+ * keeps its own Tab.
+ */
+export function trapTab(e: KeyboardEvent, dialog: HTMLElement) {
+  const active = document.activeElement as HTMLElement | null;
+  const modal = active?.closest('[aria-modal="true"]');
+  if (modal && modal !== dialog) return;
+  e.preventDefault();
+  const focusable = [...dialog.querySelectorAll<HTMLElement>(TABBABLE)].filter((el) => el.getClientRects().length > 0);
+  if (!focusable.length) return;
+  const at = active ? focusable.indexOf(active) : -1;
+  const step = e.shiftKey ? -1 : 1;
+  const next = at === -1 ? (e.shiftKey ? focusable.length - 1 : 0) : (at + step + focusable.length) % focusable.length;
+  focusable[next].focus();
+}

@@ -37,7 +37,8 @@ export function UndoToast() {
   const secondsLeft = Math.min(UNDO_MS / 1000, Math.max(1, Math.ceil((deletion.until - now) / 1000)));
   const name = transactionTitle(txn);
   const amount = txn.is_parsed ? ` · ${formatMoney(txn.type === "DEBIT" ? -txn.minor : txn.minor, txn.currency, { signed: true })}` : "";
-  // Its lend & borrow entries go with it; no amount, so the longer line still fits (in two lines at most).
+  // Its lend & borrow entries go with it; no amount. Only the name is cut short: the warning stays whole,
+  // wrapping onto a third line on a narrow phone.
   const linked = !failed && txn.linked_amount > 0;
   return (
     <div className="pointer-events-none fixed inset-x-4 bottom-[calc(max(env(safe-area-inset-bottom),0.75rem)+78px)] z-50 flex justify-center lg:bottom-6 lg:left-64">
@@ -50,13 +51,14 @@ export function UndoToast() {
         )}
       >
         <Trash2 size={16} className="shrink-0 text-canvas/70" aria-hidden />
-        <span className={cx("min-w-0 flex-1", linked ? "line-clamp-2 break-words" : "truncate")}>
-          {failed
-            ? `Couldn't delete ${name}, so it's back.`
-            : linked
-              ? `Deleted ${name} and its lend & borrow entries`
-              : `Deleted ${name}${amount}`}
-        </span>
+        {linked ? (
+          <span className="min-w-0 flex-1">
+            <span className="block truncate">Deleted {name}</span>{" "}
+            <span className="block break-words">and its lend &amp; borrow entries</span>
+          </span>
+        ) : (
+          <span className="min-w-0 flex-1 truncate">{failed ? `Couldn't delete ${name}, so it's back.` : `Deleted ${name}${amount}`}</span>
+        )}
         {failed ? (
           <button type="button" onClick={dismissDeletion} aria-label="Dismiss" className="grid size-8 shrink-0 place-items-center rounded-full hover:bg-canvas/15">
             <X size={16} />
